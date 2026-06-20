@@ -1,12 +1,12 @@
 //+------------------------------------------------------------------+
-//|                                             SND_Trading_System.mq5|
+//|                                             SND_Quick_Retest_System.mq5|
 //|                                  Copyright 2026, User            |
 //+------------------------------------------------------------------+
 #property strict
 #include <Trade\Trade.mqh> 
 
 //--- Input Parameters
-input double InpBasingRatio = 0.618; // Rasio maksimal body candle untuk dianggap Base
+input double InpBasingRatio = 0.63; // Rasio maksimal body candle untuk dianggap Base
 input int    InpMaxBase     = 13;    // Maksimal candle base berurutan
 input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally
 input bool   InpShowDBD     = true;  // Tampilkan Drop Base Drop
@@ -69,8 +69,8 @@ void CloseAllOrders();
 int OnInit() 
 { 
    // Membuat nama objek unik, contoh hasil: "SND_55555_"
-   PREF = "SND_" + IntegerToString(InpMagicNumber) + "_";
-   ZONE_PREF = "SND_Z_" + IntegerToString(InpMagicNumber) + "_";
+   PREF = "SNDQR_" + IntegerToString(InpMagicNumber) + "_";
+   ZONE_PREF = "SNDQR_Z_" + IntegerToString(InpMagicNumber) + "_";
    
    // Mengatur agar setiap kali EA ini mengirim order, Magic Number langsung terpasang otomatis
    trade.SetExpertMagicNumber(InpMagicNumber);
@@ -102,7 +102,17 @@ void OnTick() {
    // CADANGAN: Jika OnTimer macet, jam akan tetap terupdate setiap kali ada tick harga baru
    datetime serverTime = TimeCurrent();
    string liveClock = TimeToString(serverTime, TIME_MINUTES | TIME_SECONDS);
-   DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, 20, 25, clrBlack);
+   DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
+   DrawNativeLabel(PREF + "Quote", "Price Attempts to Come Back!", (PANEL_W + 20), 75, clrBlack);
+   DrawNativeLabel(PREF + "Quote2", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 100, clrBlack);
+   
+
+   static datetime lastBarTime = 0;
+   datetime curBarTime = iTime(_Symbol, _Period, 0);
+   if(curBarTime != lastBarTime) {
+      lastBarTime = curBarTime;
+      ScanSD();
+   }
 }
 
 // --- FUNGSI TIMER UNTUK MENYETEL WARNA MULTI EMA DARI EA ---
@@ -115,7 +125,9 @@ void OnTimer()
    datetime serverTime = TimeCurrent(); // Gunakan TimeCurrent agar singkron dengan market, atau TimeLocal() untuk jam PC
    string liveClock = TimeToString(serverTime, TIME_MINUTES | TIME_SECONDS);
    
-   DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, 20, 25, clrBlack);
+   DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
+   DrawNativeLabel(PREF + "Quote", "Price Attempts to Come Back!", (PANEL_W + 20), 75, clrBlack);
+   DrawNativeLabel(PREF + "Quote2", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 100, clrBlack);
    
    ChartRedraw();
 }
@@ -439,23 +451,46 @@ bool IsBasing(int idx) {
 
 // --- Logic Trading ---
 void PlaceBuyLimit() { 
-   int layers = (int)GetInputValue("InpLayers"); double lot = GetInputValue("InpLot"); 
-   double entry = GetInputValue("Buy_Entry"); double sl = GetInputValue("Buy_Stoploss"); 
-   double tp1 = GetInputValue("Buy_TP1"); double tp2 = GetInputValue("Buy_TP2"); double tp3 = GetInputValue("Buy_TP3"); 
+   int layers = (int)GetInputValue("InpLayers"); 
+   double lot = GetInputValue("InpLot"); 
+   double entry = GetInputValue("Buy_Entry"); 
+   double sl = GetInputValue("Buy_Stoploss"); 
+   double risk = entry - sl;
+   double tp1 = GetInputValue("Buy_TP1"); 
+   double tp2 = GetInputValue("Buy_TP2"); 
+   double tp3 = GetInputValue("Buy_TP3"); 
+   double tp4 = tp3 + risk;
+   double tp5 = tp4 + risk;
+
    if(entry == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
-      double tp = (i == 0) ? tp1 : (i == 1) ? tp2 : tp3; 
+      double tp = tp1;
+      if(i == 1) tp = tp2;
+      else if(i == 2) tp = tp3;
+      else if(i == 3) tp = tp4;
+      else if(i == 4) tp = tp5;
       trade.BuyLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Buy L"+IntegerToString(i+1)); 
    } 
 }
 
 void PlaceSellLimit() { 
-   int layers = (int)GetInputValue("InpLayers"); double lot = GetInputValue("InpLot"); 
-   double entry = GetInputValue("Sell_Entry"); double sl = GetInputValue("Sell_Stoploss"); 
-   double tp1 = GetInputValue("Sell_TP1"); double tp2 = GetInputValue("Sell_TP2"); double tp3 = GetInputValue("Sell_TP3"); 
+   int layers = (int)GetInputValue("InpLayers"); 
+   double lot = GetInputValue("InpLot"); 
+   double entry = GetInputValue("Sell_Entry"); 
+   double sl = GetInputValue("Sell_Stoploss"); 
+   double risk = sl - entry;
+   double tp1 = GetInputValue("Sell_TP1"); 
+   double tp2 = GetInputValue("Sell_TP2"); 
+   double tp3 = GetInputValue("Sell_TP3"); 
+   double tp4 = tp3 + risk;
+   double tp5 = tp4 + risk;
    if(entry == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
-      double tp = (i == 0) ? tp1 : (i == 1) ? tp2 : tp3; 
+      double tp = tp1;
+      if(i == 1) tp = tp2;
+      else if(i == 2) tp = tp3;
+      else if(i == 3) tp = tp4;
+      else if(i == 4) tp = tp5;
       trade.SellLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Sell L"+IntegerToString(i+1)); 
    } 
 }
@@ -503,7 +538,9 @@ void CalculateAndDrawAll() {
    UpdateLine(PREF+"Calc_S_SL", sSL, clrRed); 
 
    UpdateLine(PREF+"Calc_B_TP1", bEntry + bRisk, clrGreen); UpdateLine(PREF+"Calc_B_TP2", bEntry + (2 * bRisk), clrGreen); UpdateLine(PREF+"Calc_B_TP3", bEntry + (3 * bRisk), clrGreen);
+   UpdateLine(PREF+"Calc_B_TP4", bEntry + (4 * bRisk), clrGreen); UpdateLine(PREF+"Calc_B_TP5", bEntry + (5 * bRisk), clrGreen);
    UpdateLine(PREF+"Calc_S_TP1", sEntry - sRisk, clrGreen); UpdateLine(PREF+"Calc_S_TP2", sEntry - (2 * sRisk), clrGreen); UpdateLine(PREF+"Calc_S_TP3", sEntry - (3 * sRisk), clrGreen);
+   UpdateLine(PREF+"Calc_S_TP4", sEntry - (4 * sRisk), clrGreen); UpdateLine(PREF+"Calc_S_TP5", sEntry - (5 * sRisk), clrGreen);
    
    UpdateInput("Buy_Floor", pFloor); UpdateInput("Buy_Entry", bEntry); UpdateInput("Buy_Stoploss", bSL); 
    UpdateInput("Buy_TP1", bEntry+bRisk); UpdateInput("Buy_TP2", bEntry+(2*bRisk)); UpdateInput("Buy_TP3", bEntry+(3*bRisk));
@@ -536,11 +573,13 @@ void CreateDashboard() {
    CreateObject("HdrPanel", OBJ_RECTANGLE_LABEL, 0, 10, HEADER_Y, PANEL_W, 40, clrBlack);
    ObjectSetInteger(0, PREF+"HdrPanel", OBJPROP_BGCOLOR, clrDarkSlateGray);
    CreateButton("Hide", 15, HEADER_Y + 7, 50, 25, "Hide", clrGray, clrWhite);
-   CreateLabel("Title", (PANEL_W / 2) + 10 - 40, HEADER_Y + 2, "SND Trading System", clrWhite); 
+   CreateLabel("Title", (PANEL_W / 2) - 80, HEADER_Y + 2, "SND Quick Retest", clrWhite);
    CreateObject("Panel", OBJ_RECTANGLE_LABEL, 0, 10, UI_Y, PANEL_W, PANEL_H, clrDarkSlateGray);
    
-   CreateLabel("LblLayers", 20, UI_Y+12, "Layers:", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "1");
-   CreateLabel("LblLot", 270, UI_Y+12, "Lot/Layer:", clrOrange); CreateEdit("InpLot", 370, UI_Y+18, 100, 25, "0.01");
+   CreateLabel("LblLayers", 20, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "5");
+   CreateLabel("LblLot", 270, UI_Y+12, "Lot", clrOrange); CreateEdit("InpLot", 370, UI_Y+18, 100, 25, "0.01");
+
+//    CreateLabel("LblQuote", 70, UI_Y+45, "Price Attempts to Come Back!", clrBlack);
    
    CreateButton("BtnDraw", 20, UI_Y+80, 180, 30, "Draw Line", clrPurple, clrWhite);
    CreateButton("BtnScanSD", 270, UI_Y+80, 180, 30, "Scan S&D", clrDarkGreen, clrWhite);
