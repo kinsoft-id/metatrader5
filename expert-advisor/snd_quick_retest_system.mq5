@@ -483,8 +483,8 @@ void PlaceSellLimit() {
    double tp1 = GetInputValue("Sell_TP1"); 
    double tp2 = GetInputValue("Sell_TP2"); 
    double tp3 = GetInputValue("Sell_TP3"); 
-   double tp4 = entry + (4*risk);
-   double tp5 = entry + (5*risk);
+   double tp4 = entry - (4*risk);
+   double tp5 = entry - (5*risk);
    if(entry == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
       double tp = tp1;
