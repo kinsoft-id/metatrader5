@@ -128,6 +128,7 @@ void OnTimer()
    DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
    DrawNativeLabel(PREF + "Quote", "Price Attempts to Come Back!", (PANEL_W + 20), 75, clrBlack);
    DrawNativeLabel(PREF + "Quote2", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 100, clrBlack);
+   DrawNativeLabel(PREF + "Quote3", "Entry Counter Trend 1x entry RR 1:1 Maksimal 2x Pantulan", (PANEL_W + 20), 125, clrBlack);
    
    ChartRedraw();
 }
@@ -459,8 +460,8 @@ void PlaceBuyLimit() {
    double tp1 = GetInputValue("Buy_TP1"); 
    double tp2 = GetInputValue("Buy_TP2"); 
    double tp3 = GetInputValue("Buy_TP3"); 
-   double tp4 = tp3 + risk;
-   double tp5 = tp4 + risk;
+   double tp4 = entry + (4*risk);
+   double tp5 = entry + (5*risk);
 
    if(entry == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
@@ -482,8 +483,8 @@ void PlaceSellLimit() {
    double tp1 = GetInputValue("Sell_TP1"); 
    double tp2 = GetInputValue("Sell_TP2"); 
    double tp3 = GetInputValue("Sell_TP3"); 
-   double tp4 = tp3 + risk;
-   double tp5 = tp4 + risk;
+   double tp4 = entry + (4*risk);
+   double tp5 = entry + (5*risk);
    if(entry == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
       double tp = tp1;
