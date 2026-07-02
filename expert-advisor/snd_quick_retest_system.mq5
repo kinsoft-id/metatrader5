@@ -12,7 +12,7 @@ input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally
 input bool   InpShowDBD     = true;  // Tampilkan Drop Base Drop
 input bool   InpShowDBR     = false;  // Tampilkan Drop Base Rally
 input bool   InpShowRBD     = false;  // Tampilkan Rally Base Drop
-input int InpMaxZones = 20; // Maksimal zona yang ditampilkan
+input int InpMaxZones = 5; // Maksimal zona yang ditampilkan
 
 // Struktur untuk menyimpan data berita yang sudah disaring
 struct USDNewsData {
@@ -498,22 +498,35 @@ void PlaceSellLimit() {
 
 void PlaceBuyNow() { 
    double lot = GetInputValue("InpLot");
-   double sl  = GetInputValue("Buy_Stoploss");
-   double tp  = GetInputValue("Buy_TP3");
+   double entry = GetInputValue("Buy_Entry"); 
+   double sl = GetInputValue("Buy_Stoploss"); 
+   double risk = entry - sl;
+   double tp1 = GetInputValue("Buy_TP1"); 
+   double tp2 = GetInputValue("Buy_TP2"); 
+   double tp3 = GetInputValue("Buy_TP3"); 
+   double tp4 = entry + (4*risk);
+   double tp5 = entry + (5*risk);
+   
    if(lot <= 0) {
       Print("Lot size is zero or negative, cannot execute Buy trade.");
       return;
    }
    if(trade.Buy(lot, _Symbol, 0, sl, tp, "BuyNow"))
-      Print("Buy order executed: Lot=", lot, ", SL=", sl, ", TP=", tp);
+      Print("Buy order executed: Lot=", lot, ", SL=", sl, ", TP=", tp5);
    else
       Print("Failed to execute Buy order. Error: ", GetLastError());
 }
 
 void PlaceSellNow() { 
    double lot = GetInputValue("InpLot");
-   double sl  = GetInputValue("Sell_Stoploss");
-   double tp  = GetInputValue("Sell_TP3");
+   double entry = GetInputValue("Sell_Entry"); 
+   double sl = GetInputValue("Sell_Stoploss"); 
+   double risk = sl - entry;
+   double tp1 = GetInputValue("Sell_TP1"); 
+   double tp2 = GetInputValue("Sell_TP2"); 
+   double tp3 = GetInputValue("Sell_TP3"); 
+   double tp4 = entry - (4*risk);
+   double tp5 = entry - (5*risk);
    if(lot <= 0) {
       Print("Lot size is zero or negative, cannot execute Sell trade.");
       return;
