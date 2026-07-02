@@ -511,7 +511,7 @@ void PlaceBuyNow() {
       Print("Lot size is zero or negative, cannot execute Buy trade.");
       return;
    }
-   if(trade.Buy(lot, _Symbol, 0, sl, tp, "BuyNow"))
+   if(trade.Buy(lot, _Symbol, 0, sl, tp5, "BuyNow"))
       Print("Buy order executed: Lot=", lot, ", SL=", sl, ", TP=", tp5);
    else
       Print("Failed to execute Buy order. Error: ", GetLastError());
@@ -531,8 +531,8 @@ void PlaceSellNow() {
       Print("Lot size is zero or negative, cannot execute Sell trade.");
       return;
    }
-   if(trade.Sell(lot, _Symbol, 0, sl, tp, "SellNow"))
-      Print("Sell order executed: Lot=", lot, ", SL=", sl, ", TP=", tp);
+   if(trade.Sell(lot, _Symbol, 0, sl, tp5, "SellNow"))
+      Print("Sell order executed: Lot=", lot, ", SL=", sl, ", TP=", tp5);
    else
       Print("Failed to execute Sell order. Error: ", GetLastError());
 }
