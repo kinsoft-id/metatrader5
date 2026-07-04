@@ -527,6 +527,7 @@ void PlaceSellNow() {
    double tp3 = GetInputValue("Sell_TP3"); 
    double tp4 = entry - (4*risk);
    double tp5 = entry - (5*risk);
+   
    if(lot <= 0) {
       Print("Lot size is zero or negative, cannot execute Sell trade.");
       return;
