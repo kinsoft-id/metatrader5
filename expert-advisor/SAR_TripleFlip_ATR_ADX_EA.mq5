@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
-//|                                            SAR_ATR_ADX_EA.mq5    |
+//|                              SAR_TripleFlip_ATR_ADX_EA.mq5      |
 //|                                  Copyright 2026, User            |
-//|  Entry: 3x SAR flip | SL/TP: ATR14 | Filter: EMA50/200 + ADX14    |
+//|  Entry: 3 SAR flip bersamaan | SL/TP: ATR14 | EMA50/200 + ADX14 |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, User"
-#property version   "1.20"
+#property version   "1.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -55,8 +55,8 @@ input double             InpMaxLotPerLayer   = 0.0;         // Max lot per layer
 
 input group "=== Order ==="
 input int                InpMaxSpread        = 50;          // Max spread (pts, 0=off)
-input ulong              InpMagic            = 88002;       // Magic Number
-input string             InpComment          = "SAR_ATR_ADX"; // Order comment prefix
+input ulong              InpMagic            = 88003;       // Magic Number
+input string             InpComment          = "SAR_3FLIP"; // Order comment prefix
 
 //--- Lainnya
 input group "=== Lainnya ==="
@@ -278,18 +278,24 @@ bool IsSellFlip(double close1, double close2, double sar1, double sar2)
    return IsSarBearish(close1, sar1) && IsSarBullish(close2, sar2);
 }
 
-bool IsTripleSarBullish(double close1, double sarSlow1, double sarMod1, double sarFast1)
+bool IsTripleBuyFlip(double close1, double close2,
+                     double sarSlow1, double sarSlow2,
+                     double sarMod1,  double sarMod2,
+                     double sarFast1, double sarFast2)
 {
-   return IsSarBullish(close1, sarSlow1) &&
-          IsSarBullish(close1, sarMod1)  &&
-          IsSarBullish(close1, sarFast1);
+   return IsBuyFlip(close1, close2, sarSlow1, sarSlow2) &&
+          IsBuyFlip(close1, close2, sarMod1,  sarMod2)  &&
+          IsBuyFlip(close1, close2, sarFast1, sarFast2);
 }
 
-bool IsTripleSarBearish(double close1, double sarSlow1, double sarMod1, double sarFast1)
+bool IsTripleSellFlip(double close1, double close2,
+                      double sarSlow1, double sarSlow2,
+                      double sarMod1,  double sarMod2,
+                      double sarFast1, double sarFast2)
 {
-   return IsSarBearish(close1, sarSlow1) &&
-          IsSarBearish(close1, sarMod1)  &&
-          IsSarBearish(close1, sarFast1);
+   return IsSellFlip(close1, close2, sarSlow1, sarSlow2) &&
+          IsSellFlip(close1, close2, sarMod1,  sarMod2)  &&
+          IsSellFlip(close1, close2, sarFast1, sarFast2);
 }
 
 bool IsBuyEntrySignal(double close1, double close2,
@@ -297,10 +303,7 @@ bool IsBuyEntrySignal(double close1, double close2,
                       double sarMod1,  double sarMod2,
                       double sarFast1, double sarFast2)
 {
-   if(!IsTripleSarBullish(close1, sarSlow1, sarMod1, sarFast1)) return false;
-   return IsBuyFlip(close1, close2, sarFast1, sarFast2) ||
-          IsBuyFlip(close1, close2, sarMod1, sarMod2)  ||
-          IsBuyFlip(close1, close2, sarSlow1, sarSlow2);
+   return IsTripleBuyFlip(close1, close2, sarSlow1, sarSlow2, sarMod1, sarMod2, sarFast1, sarFast2);
 }
 
 bool IsSellEntrySignal(double close1, double close2,
@@ -308,10 +311,7 @@ bool IsSellEntrySignal(double close1, double close2,
                        double sarMod1,  double sarMod2,
                        double sarFast1, double sarFast2)
 {
-   if(!IsTripleSarBearish(close1, sarSlow1, sarMod1, sarFast1)) return false;
-   return IsSellFlip(close1, close2, sarFast1, sarFast2) ||
-          IsSellFlip(close1, close2, sarMod1, sarMod2)  ||
-          IsSellFlip(close1, close2, sarSlow1, sarSlow2);
+   return IsTripleSellFlip(close1, close2, sarSlow1, sarSlow2, sarMod1, sarMod2, sarFast1, sarFast2);
 }
 
 string SarSideLabel(double close1, double sar1)
@@ -513,7 +513,7 @@ void UpdateDashboard(double atr1, double emaFast1, double emaSlow1, double adx1,
 
    CreateDashboardBackground();
 
-   CreateLabel(PREF + "Title", x, y, "SAR x3 + EMA + ATR + ADX EA", clrBlack, 10);
+   CreateLabel(PREF + "Title", x, y, "SAR x3 TRIPLE FLIP + EMA + ADX", clrBlack, 10);
    y += lh;
    CreateLabel(PREF + "State", x, y, "Bot: " + BotStateText(state), BotStateColor(state), 9);
    y += lh;
@@ -535,7 +535,7 @@ void UpdateDashboard(double atr1, double emaFast1, double emaSlow1, double adx1,
    y += lh;
    CreateLabel(PREF + "SarFast", x, y,
               "SAR Fast (" + DoubleToString(InpSarFastStep, 2) + "/" + DoubleToString(InpSarFastMax, 1) + "): " +
-              SarSideLabel(close1, sarFast1),
+              SarSideLabel(close1, sarFast1) + " | Entry: 3 flip",
               clrBlack, 9);
    y += lh;
    CreateLabel(PREF + "Atr", x, y, "ATR(" + IntegerToString(InpAtrPeriod) + "): " + DoubleToString(atr1, _Digits), clrBlack, 9);
@@ -608,7 +608,7 @@ void CreateLabel(string name, int x, int y, string text, color clr, int fontSize
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   PREF = "SARATR_" + IntegerToString(InpMagic) + "_";
+   PREF = "SAR3FL_" + IntegerToString(InpMagic) + "_";
 
    if(InpAdxIdleMax >= InpAdxEntryMin)
    {
@@ -666,7 +666,8 @@ int OnInit()
    trade.SetExpertMagicNumber(InpMagic);
    g_lastBarTime = iTime(_Symbol, _Period, 0);
 
-   Print("SAR_ATR_ADX_EA v1.20 | EMA", InpEmaFast, "/", InpEmaSlow,
+   Print("SAR_TripleFlip_ATR_ADX_EA v1.00 | Entry=3 SAR flip bersamaan",
+         " | EMA", InpEmaFast, "/", InpEmaSlow,
          " | SAR Slow ", InpSarSlowStep, "/", InpSarSlowMax,
          " Mod ", InpSarModStep, "/", InpSarModMax,
          " Fast ", InpSarFastStep, "/", InpSarFastMax,

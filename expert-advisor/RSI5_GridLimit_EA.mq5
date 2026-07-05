@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
 //|                                        RSI5_GridLimit_EA.mq5     |
 //|                                  Copyright 2026, User            |
-//|                                        Version 1.09              |
+//|                                        Version 1.10              |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, User"
-#property version   "1.09"
+#property version   "1.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -13,8 +13,8 @@
 input group "=== Sinyal RSI ==="
 input int                InpRsiPeriod        = 5;           // InpRsiPeriod
 input ENUM_TIMEFRAMES    InpRsiTF            = PERIOD_M1;   // InpRsiTF
-input double             InpRsiBuyLevel      = 40.0;        // InpRsiBuyLevel
-input double             InpRsiSellLevel     = 60.0;        // InpRsiSellLevel
+input double             InpRsiBuyLevel      = 30.0;        // InpRsiBuyLevel
+input double             InpRsiSellLevel     = 70.0;        // InpRsiSellLevel
 input bool               InpAllowBuy         = false;        // InpAllowBuy
 input bool               InpAllowSell        = true;        // InpAllowSell
 input int                InpMaxCycles        = 0;          // InpMaxCycles (0 = tidak dibatasi)
@@ -28,13 +28,13 @@ input int                InpLayerDistance    = 1000;         // InpLayerDistance
 input int                InpNoStackGapPts    = 50;          // InpNoStackGapPts
 input double             InpLotPerLayer      = 0.05;        // InpLotPerLayer
 input double             InpLotIncrement     = 0.05;        // InpLotIncrement
-input int                InpBepExitMinLayers = 30;          // Close di BEP jika layer >= ini (0=off)
+input int                InpBepExitMinLayers = 30;          // Target USD saja jika layer >= ini (0=off)
 
 //--- Virtual TP (Trailing dari BEP)
 input group "=== Virtual TP (Trailing dari BEP) ==="
 input int                InpTrailingStart    = 1888;        // InpTrailingStart
 input int                InpTrailingStop     = 888;         // InpTrailingStop
-input double             InpTargetProfitUSD  = 400.0;       // InpTargetProfitUSD (0 = nonaktif)
+input double             InpTargetProfitUSD  = 100.0;       // InpTargetProfitUSD (0 = nonaktif)
 input bool               InpIncludeManual    = true;        // InpIncludeManual
 
 //--- Virtual SL
@@ -636,6 +636,9 @@ void ManageVirtualExit(ENUM_POSITION_TYPE type)
       return;
    }
 
+   int totalLayers = CountTotalLayers(type);
+   bool targetOnlyMode = (InpBepExitMinLayers > 0 && totalLayers >= InpBepExitMinLayers);
+
    if(InpTargetProfitUSD > 0.0)
    {
       double basketPL = BasketProfit(type);
@@ -653,22 +656,12 @@ void ManageVirtualExit(ENUM_POSITION_TYPE type)
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   int totalLayers = CountTotalLayers(type);
-   bool bepOnlyMode = (InpBepExitMinLayers > 0 && totalLayers >= InpBepExitMinLayers);
 
    if(type == POSITION_TYPE_BUY)
    {
       if(InpVirtualSL > 0 && bid <= bep - InpVirtualSL * _Point)
       {
          ClosePositionsByType(POSITION_TYPE_BUY, "Virtual SL BUY");
-         return;
-      }
-
-      if(bepOnlyMode)
-      {
-         if(bid > bep)
-            ClosePositionsByType(POSITION_TYPE_BUY, "BEP exit BUY (L>"
-                                    + IntegerToString(totalLayers) + ")");
          return;
       }
    }
@@ -679,15 +672,10 @@ void ManageVirtualExit(ENUM_POSITION_TYPE type)
          ClosePositionsByType(POSITION_TYPE_SELL, "Virtual SL SELL");
          return;
       }
-
-      if(bepOnlyMode)
-      {
-         if(ask < bep)
-            ClosePositionsByType(POSITION_TYPE_SELL, "BEP exit SELL (L>"
-                                    + IntegerToString(totalLayers) + ")");
-         return;
-      }
    }
+
+   if(targetOnlyMode)
+      return;
 
    double trailStart = InpTrailingStart * _Point;
    double trailStop  = InpTrailingStop * _Point;
@@ -955,7 +943,7 @@ void UpdateDashboard()
       activeCycle = g_completedCycles + 1;
 
    // Row 0 - Header
-   DrawDashLabel(0, "== RSI5 GRID EA v1.09 " + statusTxt + " ==", clrYellow);
+   DrawDashLabel(0, "== RSI5 GRID EA v1.10 " + statusTxt + " ==", clrYellow);
 
    // Row 1 - Balance / Equity
    DrawDashLabel(1,
@@ -1028,13 +1016,13 @@ void UpdateDashboard()
       clrDeepSkyBlue);
 
    // Row 11 - Spread & layer
-   string bepMode = (InpBepExitMinLayers > 0
-                     ? " | BEP>=" + IntegerToString(InpBepExitMinLayers) + "L"
-                     : "");
+   string layerMode = (InpBepExitMinLayers > 0
+                       ? " | Tgt>=" + IntegerToString(InpBepExitMinLayers) + "L"
+                       : "");
    DrawDashLabel(11,
       "Spread: " + IntegerToString(spread) + " pt | Layer: "
       + IntegerToString(InpMaxLayers) + " x " + IntegerToString(InpLayerDistance) + " pt"
-      + bepMode,
+      + layerMode,
       clrSilver);
 
    // Row 12 - Connection & lot
