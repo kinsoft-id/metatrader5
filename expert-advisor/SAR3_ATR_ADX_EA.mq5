@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
-//|                                            SAR_ATR_ADX_EA.mq5    |
+//|                                            SAR3_ATR_ADX_EA.mq5    |
 //|                                  Copyright 2026, User            |
-//|  Entry: SAR flip | SL/TP: ATR14 | Filter: EMA50/200 + ADX14        |
+//|  Entry: 3x SAR flip | SL/TP: ATR14 | Filter: EMA50/200 + ADX14    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, User"
-#property version   "1.21"
+#property version   "1.20"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -14,10 +14,14 @@ input group "=== Filter Tren EMA ==="
 input int                InpEmaFast          = 50;          // EMA Fast
 input int                InpEmaSlow          = 200;         // EMA Slow
 
-//--- SAR Entry
-input group "=== SAR Entry ==="
-input double             InpSarStep          = 0.01;        // SAR Step
-input double             InpSarMaximum       = 0.08;        // SAR Maximum
+//--- SAR Entry (3 layer)
+input group "=== SAR Entry (Slow / Mod / Fast) ==="
+input double             InpSarSlowStep      = 0.01;        // SAR Slow Step
+input double             InpSarSlowMax       = 0.2;         // SAR Slow Maximum
+input double             InpSarModStep       = 0.02;        // SAR Moderate Step
+input double             InpSarModMax        = 0.2;         // SAR Moderate Maximum
+input double             InpSarFastStep      = 0.03;        // SAR Fast Step
+input double             InpSarFastMax       = 0.2;         // SAR Fast Maximum
 
 input group "=== ATR / ADX ==="
 input int                InpAtrPeriod        = 14;          // ATR Period
@@ -62,7 +66,9 @@ input bool               InpOneBatch         = true;        // Tunggu semua laye
 CTrade   trade;
 string   PREF = "";
 
-int      g_sarHandle     = INVALID_HANDLE;
+int      g_sarSlowHandle = INVALID_HANDLE;
+int      g_sarModHandle  = INVALID_HANDLE;
+int      g_sarFastHandle = INVALID_HANDLE;
 int      g_emaFastHandle = INVALID_HANDLE;
 int      g_emaSlowHandle = INVALID_HANDLE;
 int      g_atrHandle     = INVALID_HANDLE;
@@ -74,7 +80,7 @@ const int DASH_BG_X    = 4;
 const int DASH_BG_Y    = 10;
 const int DASH_BG_W    = 420;
 const int DASH_ROW_H   = 18;
-const int DASH_ROWS    = 13;
+const int DASH_ROWS    = 15;
 const int DASH_BG_PAD  = 8;
 
 enum ENUM_BOT_STATE
@@ -172,17 +178,23 @@ bool CopyBufferOne(int handle, int shift, double &value, bool requirePositive)
    return true;
 }
 
-bool GetIndicators(double &sar1, double &sar2,
+bool GetIndicators(double &sarSlow1, double &sarSlow2,
+                   double &sarMod1,  double &sarMod2,
+                   double &sarFast1, double &sarFast2,
                    double &emaFast1, double &emaSlow1,
                    double &atr1, double &adx1,
                    double &close1, double &close2)
 {
-   if(!CopyBufferOne(g_sarHandle,     1, sar1,     true))  return false;
-   if(!CopyBufferOne(g_sarHandle,     2, sar2,     true))  return false;
+   if(!CopyBufferOne(g_sarSlowHandle, 1, sarSlow1, true)) return false;
+   if(!CopyBufferOne(g_sarSlowHandle, 2, sarSlow2, true)) return false;
+   if(!CopyBufferOne(g_sarModHandle,  1, sarMod1,  true)) return false;
+   if(!CopyBufferOne(g_sarModHandle,  2, sarMod2,  true)) return false;
+   if(!CopyBufferOne(g_sarFastHandle, 1, sarFast1, true)) return false;
+   if(!CopyBufferOne(g_sarFastHandle, 2, sarFast2, true)) return false;
    if(!CopyBufferOne(g_emaFastHandle, 1, emaFast1, false)) return false;
    if(!CopyBufferOne(g_emaSlowHandle, 1, emaSlow1, false)) return false;
-   if(!CopyBufferOne(g_atrHandle,     1, atr1,     true))  return false;
-   if(!CopyBufferOne(g_adxHandle,     1, adx1,     true))  return false;
+   if(!CopyBufferOne(g_atrHandle,     1, atr1,     true)) return false;
+   if(!CopyBufferOne(g_adxHandle,     1, adx1,     true)) return false;
 
    close1 = iClose(_Symbol, _Period, 1);
    close2 = iClose(_Symbol, _Period, 2);
@@ -264,6 +276,42 @@ bool IsBuyFlip(double close1, double close2, double sar1, double sar2)
 bool IsSellFlip(double close1, double close2, double sar1, double sar2)
 {
    return IsSarBearish(close1, sar1) && IsSarBullish(close2, sar2);
+}
+
+bool IsTripleSarBullish(double close1, double sarSlow1, double sarMod1, double sarFast1)
+{
+   return IsSarBullish(close1, sarSlow1) &&
+          IsSarBullish(close1, sarMod1)  &&
+          IsSarBullish(close1, sarFast1);
+}
+
+bool IsTripleSarBearish(double close1, double sarSlow1, double sarMod1, double sarFast1)
+{
+   return IsSarBearish(close1, sarSlow1) &&
+          IsSarBearish(close1, sarMod1)  &&
+          IsSarBearish(close1, sarFast1);
+}
+
+bool IsBuyEntrySignal(double close1, double close2,
+                      double sarSlow1, double sarSlow2,
+                      double sarMod1,  double sarMod2,
+                      double sarFast1, double sarFast2)
+{
+   if(!IsTripleSarBullish(close1, sarSlow1, sarMod1, sarFast1)) return false;
+   return IsBuyFlip(close1, close2, sarFast1, sarFast2) ||
+          IsBuyFlip(close1, close2, sarMod1, sarMod2)  ||
+          IsBuyFlip(close1, close2, sarSlow1, sarSlow2);
+}
+
+bool IsSellEntrySignal(double close1, double close2,
+                       double sarSlow1, double sarSlow2,
+                       double sarMod1,  double sarMod2,
+                       double sarFast1, double sarFast2)
+{
+   if(!IsTripleSarBearish(close1, sarSlow1, sarMod1, sarFast1)) return false;
+   return IsSellFlip(close1, close2, sarFast1, sarFast2) ||
+          IsSellFlip(close1, close2, sarMod1, sarMod2)  ||
+          IsSellFlip(close1, close2, sarSlow1, sarSlow2);
 }
 
 string SarSideLabel(double close1, double sar1)
@@ -417,8 +465,10 @@ int OpenMultiTrades(ENUM_ORDER_TYPE orderType, double atr1)
 
 void ProcessSignals()
 {
-   double sar1, sar2, emaFast1, emaSlow1, atr1, adx1, close1, close2;
-   if(!GetIndicators(sar1, sar2, emaFast1, emaSlow1, atr1, adx1, close1, close2)) return;
+   double sarSlow1, sarSlow2, sarMod1, sarMod2, sarFast1, sarFast2;
+   double emaFast1, emaSlow1, atr1, adx1, close1, close2;
+   if(!GetIndicators(sarSlow1, sarSlow2, sarMod1, sarMod2, sarFast1, sarFast2,
+                     emaFast1, emaSlow1, atr1, adx1, close1, close2)) return;
 
    ENUM_BOT_STATE state = GetBotState(adx1);
 
@@ -426,17 +476,21 @@ void ProcessSignals()
    if(!IsSpreadOk()) return;
    if(InpOneBatch && CountMyPositions() > 0) return;
 
+   // Filter tren: EMA50 vs EMA200
    bool uptrend   = (emaFast1 > emaSlow1);
    bool downtrend = (emaFast1 < emaSlow1);
 
-   if(uptrend && IsBuyFlip(close1, close2, sar1, sar2) && !HasPosition(POSITION_TYPE_BUY))
+   if(uptrend && IsBuyEntrySignal(close1, close2, sarSlow1, sarSlow2, sarMod1, sarMod2, sarFast1, sarFast2) &&
+      !HasPosition(POSITION_TYPE_BUY))
       OpenMultiTrades(ORDER_TYPE_BUY, atr1);
-   else if(downtrend && IsSellFlip(close1, close2, sar1, sar2) && !HasPosition(POSITION_TYPE_SELL))
+   else if(downtrend && IsSellEntrySignal(close1, close2, sarSlow1, sarSlow2, sarMod1, sarMod2, sarFast1, sarFast2) &&
+           !HasPosition(POSITION_TYPE_SELL))
       OpenMultiTrades(ORDER_TYPE_SELL, atr1);
 }
 
 void UpdateDashboard(double atr1, double emaFast1, double emaSlow1, double adx1,
-                     ENUM_BOT_STATE state, double close1, double sar1)
+                     ENUM_BOT_STATE state, double close1,
+                     double sarSlow1, double sarMod1, double sarFast1)
 {
    double ratios[];
    int    layers  = GetActiveLayerCount(ratios);
@@ -447,7 +501,6 @@ void UpdateDashboard(double atr1, double emaFast1, double emaSlow1, double adx1,
    color  trendClr = uptrend ? clrDodgerBlue : downtrend ? clrOrangeRed : clrGray;
    string emaLive   = "EMA" + IntegerToString(InpEmaFast) + "=" + DoubleToString(emaFast1, _Digits) +
                       " | EMA" + IntegerToString(InpEmaSlow) + "=" + DoubleToString(emaSlow1, _Digits);
-   string sarSet    = "Step " + DoubleToString(InpSarStep, 2) + " | Max " + DoubleToString(InpSarMaximum, 2);
 
    double previewLot = InpLotPerLayer;
    if(InpLotMode == LOT_RISK_PERCENT && layers > 0)
@@ -460,7 +513,7 @@ void UpdateDashboard(double atr1, double emaFast1, double emaSlow1, double adx1,
 
    CreateDashboardBackground();
 
-   CreateLabel(PREF + "Title", x, y, "SAR + EMA + ATR + ADX EA", clrBlack, 10);
+   CreateLabel(PREF + "Title", x, y, "SAR x3 + EMA + ATR + ADX EA", clrBlack, 10);
    y += lh;
    CreateLabel(PREF + "State", x, y, "Bot: " + BotStateText(state), BotStateColor(state), 9);
    y += lh;
@@ -470,10 +523,19 @@ void UpdateDashboard(double atr1, double emaFast1, double emaSlow1, double adx1,
    y += lh;
    CreateLabel(PREF + "Trend", x, y, "Filter tren: " + trend, trendClr, 9);
    y += lh;
-   CreateLabel(PREF + "SarSet", x, y, "SAR set: " + sarSet, clrDarkSlateGray, 9);
+   CreateLabel(PREF + "SarSlow", x, y,
+              "SAR Slow (" + DoubleToString(InpSarSlowStep, 2) + "/" + DoubleToString(InpSarSlowMax, 1) + "): " +
+              SarSideLabel(close1, sarSlow1),
+              clrDarkSlateGray, 9);
    y += lh;
-   CreateLabel(PREF + "SarVal", x, y,
-              "SAR live: " + DoubleToString(sar1, _Digits) + " | " + SarSideLabel(close1, sar1),
+   CreateLabel(PREF + "SarMod", x, y,
+              "SAR Mod (" + DoubleToString(InpSarModStep, 2) + "/" + DoubleToString(InpSarModMax, 1) + "): " +
+              SarSideLabel(close1, sarMod1),
+              clrDarkSlateGray, 9);
+   y += lh;
+   CreateLabel(PREF + "SarFast", x, y,
+              "SAR Fast (" + DoubleToString(InpSarFastStep, 2) + "/" + DoubleToString(InpSarFastMax, 1) + "): " +
+              SarSideLabel(close1, sarFast1),
               clrBlack, 9);
    y += lh;
    CreateLabel(PREF + "Atr", x, y, "ATR(" + IntegerToString(InpAtrPeriod) + "): " + DoubleToString(atr1, _Digits), clrBlack, 9);
@@ -491,8 +553,9 @@ void UpdateDashboard(double atr1, double emaFast1, double emaSlow1, double adx1,
    y += lh;
    CreateLabel(PREF + "Pos", x, y, "Posisi: " + IntegerToString(CountMyPositions()), clrBlack, 9);
 
-   string oldLabels[9] = {"Sar", "SarTrend", "SarTrendSet", "SarTrendVal", "SarEntrySet", "SarEntryVal", "SarSlow", "SarMod", "SarFast"};
-   for(int i = 0; i < 9; i++)
+   // Hapus label lama dari versi sebelumnya
+   string oldLabels[6] = {"Sar", "SarTrend", "SarTrendSet", "SarTrendVal", "SarEntrySet", "SarEntryVal"};
+   for(int i = 0; i < 6; i++)
    {
       string oldName = PREF + oldLabels[i];
       if(ObjectFind(0, oldName) >= 0) ObjectDelete(0, oldName);
@@ -553,7 +616,9 @@ int OnInit()
       return INIT_PARAMETERS_INCORRECT;
    }
    if(InpAtrSlMult <= 0.0 || InpEmaFast <= 0 || InpEmaSlow <= 0 ||
-      InpSarStep <= 0.0 || InpSarMaximum <= 0.0)
+      InpSarSlowStep <= 0.0 || InpSarSlowMax <= 0.0 ||
+      InpSarModStep <= 0.0  || InpSarModMax <= 0.0 ||
+      InpSarFastStep <= 0.0 || InpSarFastMax <= 0.0)
    {
       Print("Error: parameter EMA dan SAR harus > 0");
       return INIT_PARAMETERS_INCORRECT;
@@ -581,13 +646,16 @@ int OnInit()
       return INIT_PARAMETERS_INCORRECT;
    }
 
-   g_sarHandle     = iSAR(_Symbol, _Period, InpSarStep, InpSarMaximum);
+   g_sarSlowHandle = iSAR(_Symbol, _Period, InpSarSlowStep, InpSarSlowMax);
+   g_sarModHandle  = iSAR(_Symbol, _Period, InpSarModStep,  InpSarModMax);
+   g_sarFastHandle = iSAR(_Symbol, _Period, InpSarFastStep, InpSarFastMax);
    g_emaFastHandle = iMA(_Symbol, _Period, InpEmaFast, 0, MODE_EMA, PRICE_CLOSE);
    g_emaSlowHandle = iMA(_Symbol, _Period, InpEmaSlow, 0, MODE_EMA, PRICE_CLOSE);
    g_atrHandle     = iATR(_Symbol, _Period, InpAtrPeriod);
    g_adxHandle     = iADX(_Symbol, _Period, InpAdxPeriod);
 
-   if(g_sarHandle == INVALID_HANDLE || g_emaFastHandle == INVALID_HANDLE ||
+   if(g_sarSlowHandle == INVALID_HANDLE || g_sarModHandle == INVALID_HANDLE ||
+      g_sarFastHandle == INVALID_HANDLE || g_emaFastHandle == INVALID_HANDLE ||
       g_emaSlowHandle == INVALID_HANDLE || g_atrHandle == INVALID_HANDLE ||
       g_adxHandle == INVALID_HANDLE)
    {
@@ -598,8 +666,10 @@ int OnInit()
    trade.SetExpertMagicNumber(InpMagic);
    g_lastBarTime = iTime(_Symbol, _Period, 0);
 
-   Print("SAR_ATR_ADX_EA v1.21 | EMA", InpEmaFast, "/", InpEmaSlow,
-         " | SAR ", InpSarStep, "/", InpSarMaximum,
+   Print("SAR_ATR_ADX_EA v1.20 | EMA", InpEmaFast, "/", InpEmaSlow,
+         " | SAR Slow ", InpSarSlowStep, "/", InpSarSlowMax,
+         " Mod ", InpSarModStep, "/", InpSarModMax,
+         " Fast ", InpSarFastStep, "/", InpSarFastMax,
          " | Lot=", LotModeLabel(),
          " | SL=ATR(", InpAtrPeriod, ")x", InpAtrSlMult,
          " | Layers=", GetActiveLayerCount(ratios), " TP=", TpRatiosSummary(),
@@ -609,7 +679,9 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
-   if(g_sarHandle     != INVALID_HANDLE) IndicatorRelease(g_sarHandle);
+   if(g_sarSlowHandle != INVALID_HANDLE) IndicatorRelease(g_sarSlowHandle);
+   if(g_sarModHandle  != INVALID_HANDLE) IndicatorRelease(g_sarModHandle);
+   if(g_sarFastHandle != INVALID_HANDLE) IndicatorRelease(g_sarFastHandle);
    if(g_emaFastHandle != INVALID_HANDLE) IndicatorRelease(g_emaFastHandle);
    if(g_emaSlowHandle != INVALID_HANDLE) IndicatorRelease(g_emaSlowHandle);
    if(g_atrHandle     != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
@@ -619,11 +691,13 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
-   double sar1, sar2, emaFast1, emaSlow1, atr1, adx1, close1, close2;
-   if(!GetIndicators(sar1, sar2, emaFast1, emaSlow1, atr1, adx1, close1, close2)) return;
+   double sarSlow1, sarSlow2, sarMod1, sarMod2, sarFast1, sarFast2;
+   double emaFast1, emaSlow1, atr1, adx1, close1, close2;
+   if(!GetIndicators(sarSlow1, sarSlow2, sarMod1, sarMod2, sarFast1, sarFast2,
+                     emaFast1, emaSlow1, atr1, adx1, close1, close2)) return;
 
    ENUM_BOT_STATE state = GetBotState(adx1);
-   UpdateDashboard(atr1, emaFast1, emaSlow1, adx1, state, close1, sar1);
+   UpdateDashboard(atr1, emaFast1, emaSlow1, adx1, state, close1, sarSlow1, sarMod1, sarFast1);
 
    if(!IsNewBar()) return;
 

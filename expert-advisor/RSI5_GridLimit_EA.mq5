@@ -52,18 +52,18 @@ input bool               InpNewsLow          = false;       // InpNewsLow
 input string             InpNewsCurrencies   = "USD,XAU";   // InpNewsCurrencies
 
 //--- Filter Waktu
-input group "=== Filter Waktu (Server Broker) ==="
+input group "=== Filter Waktu (WIB Jakarta) ==="
 input bool               InpTimeFilter       = true;        // InpTimeFilter
-input int                InpStartHour        = 0;           // InpStartHour
-input int                InpStartMinute      = 0;           // InpStartMinute
-input int                InpEndHour          = 23;          // InpEndHour
-input int                InpEndMinute        = 59;          // InpEndMinute
+input int                InpStartHour        = 8;           // InpStartHour (WIB)
+input int                InpStartMinute      = 0;           // InpStartMinute (WIB)
+input int                InpEndHour          = 18;          // InpEndHour (WIB)
+input int                InpEndMinute        = 30;          // InpEndMinute (WIB)
 
 //--- Filter Jumat
 input group "=== Filter Jumat ==="
 input bool               InpFridayFilter     = true;        // InpFridayFilter
-input int                InpFridayOffHour    = 13;          // InpFridayOffHour
-input int                InpFridayOffMin     = 0;           // InpFridayOffMin
+input int                InpFridayOffHour    = 13;          // InpFridayOffHour (WIB)
+input int                InpFridayOffMin     = 0;           // InpFridayOffMin (WIB)
 
 //--- Telegram Bot
 input group "=== Telegram Bot ==="
@@ -98,10 +98,20 @@ const int      DASH_LINE_H       = 16;
 const int      DASH_ROWS         = 15;
 const int      DASH_W            = 310;
 const int      DASH_H            = DASH_ROWS * DASH_LINE_H + 12;
+const int      JAKARTA_UTC_OFFSET = 7 * 3600;
 
 //+------------------------------------------------------------------+
 //| Helpers                                                          |
 //+------------------------------------------------------------------+
+void GetJakartaDateTime(MqlDateTime &dt)
+{
+   TimeToStruct(TimeGMT() + JAKARTA_UTC_OFFSET, dt);
+}
+
+datetime JakartaNow()
+{
+   return TimeGMT() + JAKARTA_UTC_OFFSET;
+}
 double NormalizeLot(double lot)
 {
    double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
@@ -143,7 +153,7 @@ bool IsWithinDailyTime()
    if(!InpTimeFilter) return true;
 
    MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
+   GetJakartaDateTime(dt);
 
    int nowMin   = dt.hour * 60 + dt.min;
    int startMin = InpStartHour * 60 + InpStartMinute;
@@ -160,11 +170,11 @@ bool IsFridayBlocked()
    if(!InpFridayFilter) return false;
 
    MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
+   GetJakartaDateTime(dt);
    if(dt.day_of_week != 5) return false;
 
-   int nowMin    = dt.hour * 60 + dt.min;
-   int offMin    = InpFridayOffHour * 60 + InpFridayOffMin;
+   int nowMin = dt.hour * 60 + dt.min;
+   int offMin = InpFridayOffHour * 60 + InpFridayOffMin;
    return (nowMin >= offMin);
 }
 
@@ -875,8 +885,8 @@ string GetSessionLine(bool &inSession)
    inSession = IsWithinDailyTime() && !IsFridayBlocked();
 
    string sesi = Pad2(InpStartHour) + ":" + Pad2(InpStartMinute) + "-"
-                 + Pad2(InpEndHour) + ":" + Pad2(InpEndMinute) + " srv";
-   string jumat  = "Jum off " + Pad2(InpFridayOffHour) + ":" + Pad2(InpFridayOffMin);
+                 + Pad2(InpEndHour) + ":" + Pad2(InpEndMinute) + " WIB";
+   string jumat  = "Jum off " + Pad2(InpFridayOffHour) + ":" + Pad2(InpFridayOffMin) + " WIB";
 
    if(inSession)
       return ": DALAM sesi " + sesi + " | " + jumat;
@@ -957,8 +967,8 @@ void UpdateDashboard()
       + " S:" + (IsSellArmed() ? "Y" : "N"),
       clrGreen);
 
-   // Row 3 - Server time
-   DrawDashLabel(3, "Srv time: " + TimeToString(TimeCurrent(), TIME_DATE | TIME_MINUTES), clrSilver);
+   // Row 3 - WIB time
+   DrawDashLabel(3, "WIB time: " + TimeToString(JakartaNow(), TIME_DATE | TIME_MINUTES), clrSilver);
 
    // Row 4 - Session
    DrawDashLabel(4, sessionLine, inSession ? clrGreen : clrOrangeRed);
