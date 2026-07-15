@@ -451,6 +451,16 @@ bool IsBasing(int idx) {
 }
 
 // --- Logic Trading ---
+double GetSpreadPrice()
+{
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double spread = ask - bid;
+   if(spread <= 0.0)
+      spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * _Point;
+   return spread;
+}
+
 double LayerEntryPrice(double proximal, double distal, int layerIndex, int totalLayers)
 {
    if(totalLayers <= 1) return proximal;
@@ -466,10 +476,12 @@ void PlaceBuyLimit() {
    double distal = GetInputValue("Buy_Floor");
    double sl = GetInputValue("Buy_Stoploss"); 
    double tp1 = GetInputValue("Buy_TP1"); 
+   double spreadBuf = GetSpreadPrice();
 
    if(proximal == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
-      double entry = NormalizeDouble(LayerEntryPrice(proximal, distal, i, layers), _Digits);
+      // Buy Limit + spread agar Ask menyentuh entry saat Bid retest area
+      double entry = NormalizeDouble(LayerEntryPrice(proximal, distal, i, layers) + spreadBuf, _Digits);
       trade.BuyLimit(lot, entry, _Symbol, sl, tp1, ORDER_TIME_GTC, 0, "Buy L"+IntegerToString(i+1)); 
    } 
 }
@@ -482,10 +494,12 @@ void PlaceSellLimit() {
    double distal = GetInputValue("Sell_Ceiling");
    double sl = GetInputValue("Sell_Stoploss"); 
    double tp1 = GetInputValue("Sell_TP1"); 
+   double spreadBuf = GetSpreadPrice();
 
    if(proximal == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
-      double entry = NormalizeDouble(LayerEntryPrice(proximal, distal, i, layers), _Digits);
+      // Sell Limit - spread agar Bid menyentuh entry saat Ask retest area
+      double entry = NormalizeDouble(LayerEntryPrice(proximal, distal, i, layers) - spreadBuf, _Digits);
       trade.SellLimit(lot, entry, _Symbol, sl, tp1, ORDER_TIME_GTC, 0, "Sell L"+IntegerToString(i+1)); 
    } 
 }
