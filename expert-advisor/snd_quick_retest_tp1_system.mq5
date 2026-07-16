@@ -36,7 +36,7 @@ bool IsSDScanning = false;
 int UI_Y = 100;      
 int HEADER_Y = 50;   
 int PANEL_W = 500;   
-int PANEL_H = 690;   
+int PANEL_H = 730;   
 int UI_OFFSCREEN = -2000; 
 
 // --- Function Declarations ---
@@ -60,6 +60,7 @@ void CreateLabel(string name, int x, int y, string text, color clr);
 void CreateButton(string name, int x, int y, int w, int h, string text, color bg, color txtClr);
 void CreateEdit(string name, int x, int y, int w, int h, string val);
 void DelPO(ENUM_ORDER_TYPE type);
+void ClosePositionsByType(ENUM_POSITION_TYPE type);
 void CloseAllPositions();
 void CloseAllOrders();
 
@@ -171,6 +172,8 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       else if(sparam == PREF+"SellNow") { PlaceSellNow(); ObjectSetInteger(0, PREF+"SellNow", OBJPROP_STATE, false); }
       else if(sparam == PREF+"DelBuy") { DelPO(ORDER_TYPE_BUY_LIMIT); ObjectSetInteger(0, PREF+"DelBuy", OBJPROP_STATE, false); }
       else if(sparam == PREF+"DelSell") { DelPO(ORDER_TYPE_SELL_LIMIT); ObjectSetInteger(0, PREF+"DelSell", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"DelBuyPos") { ClosePositionsByType(POSITION_TYPE_BUY); ObjectSetInteger(0, PREF+"DelBuyPos", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"DelSellPos") { ClosePositionsByType(POSITION_TYPE_SELL); ObjectSetInteger(0, PREF+"DelSellPos", OBJPROP_STATE, false); }
       else if(sparam == PREF+"ClosePos") { CloseAllPositions(); ObjectSetInteger(0, PREF+"ClosePos", OBJPROP_STATE, false); }
       else if(sparam == PREF+"CloseOrd") { CloseAllOrders(); ObjectSetInteger(0, PREF+"CloseOrd", OBJPROP_STATE, false); }
       else if(sparam == PREF+"GetNews") { GetHighImpactUSDNews(); ObjectSetInteger(0, PREF+"GetNews", OBJPROP_STATE, false); }
@@ -601,26 +604,30 @@ void CreateDashboard() {
    }
    CreateButton("BtnBuyL", 20, UI_Y + 340, 200, 30, "Buy Limit", clrBlue, clrWhite);
    CreateButton("BtnSellL", 270, UI_Y + 340, 200, 30, "Sell Limit", clrOrange, clrWhite);
-   CreateButton("DelBuy", 20, UI_Y + 380, 200, 30, "Del Buy", clrBlue, clrWhite);
-   CreateButton("DelSell", 270, UI_Y + 380, 200, 30, "Del Sell", clrBrown, clrWhite);
-   CreateButton("ClosePos", 20, UI_Y + 420, PANEL_W-40, 30, "Close Positions", clrDarkRed, clrWhite);
-   CreateButton("CloseOrd", 20, UI_Y + 460, PANEL_W-40, 30, "Close All Orders", clrMaroon, clrWhite);
-   CreateButton("BuyNow", 20, UI_Y + 500, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
-   CreateButton("SellNow", 270, UI_Y + 500, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
-   CreateButton("GetNews", 20, UI_Y + 540, 200, 30, "Get News", clrGray, clrBlack);
-   CreateButton("Reset", 270, UI_Y + 540, 200, 30, "Reset", clrGray, clrBlack);
+   CreateButton("DelBuy", 20, UI_Y + 380, 200, 30, "Del Buy Order", clrBlue, clrWhite);
+   CreateButton("DelSell", 270, UI_Y + 380, 200, 30, "Del Sell Order", clrBrown, clrWhite);
+   CreateButton("DelBuyPos", 20, UI_Y + 420, 200, 30, "Del Buy Position", clrDodgerBlue, clrWhite);
+   CreateButton("DelSellPos", 270, UI_Y + 420, 200, 30, "Del Sell Position", clrOrangeRed, clrWhite);
+   CreateButton("ClosePos", 20, UI_Y + 460, PANEL_W-40, 30, "Close Positions", clrDarkRed, clrWhite);
+   CreateButton("CloseOrd", 20, UI_Y + 500, PANEL_W-40, 30, "Close All Orders", clrMaroon, clrWhite);
+   CreateButton("BuyNow", 20, UI_Y + 540, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
+   CreateButton("SellNow", 270, UI_Y + 540, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
+   CreateButton("GetNews", 20, UI_Y + 580, 200, 30, "Get News", clrGray, clrBlack);
+   CreateButton("Reset", 270, UI_Y + 580, 200, 30, "Reset", clrGray, clrBlack);
 
    // Tambahkan ini di setiap fungsi pembuatan tombol/label dashboard Anda
-   ObjectSetInteger(0, "BtnBuyL", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
-   ObjectSetInteger(0, "BtnSellL", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
-   ObjectSetInteger(0, "DelBuy", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
-   ObjectSetInteger(0, "DelSell", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
-   ObjectSetInteger(0, "ClosePos", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
-   ObjectSetInteger(0, "CloseOrd", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
-   ObjectSetInteger(0, "BuyNow", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
-   ObjectSetInteger(0, "SellNow", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
-   ObjectSetInteger(0, "GetNews", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
-   ObjectSetInteger(0, "Reset", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
+   ObjectSetInteger(0, "BtnBuyL", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, "BtnSellL", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, "DelBuy", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, "DelSell", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, "DelBuyPos", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, "DelSellPos", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, "ClosePos", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, "CloseOrd", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, "BuyNow", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, "SellNow", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, "GetNews", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, "Reset", OBJPROP_ZORDER, 10);
 
 
 }
@@ -644,6 +651,17 @@ void CreateLabel(string name, int x, int y, string text, color clr) { CreateObje
 void CreateButton(string name, int x, int y, int w, int h, string text, color bg, color txtClr) { CreateObject(name, OBJ_BUTTON, 0, x, y, w, h, bg); ObjectSetString(0, PREF+name, OBJPROP_TEXT, text); ObjectSetInteger(0, PREF+name, OBJPROP_BGCOLOR, bg); ObjectSetInteger(0, PREF+name, OBJPROP_COLOR, txtClr); }
 void CreateEdit(string name, int x, int y, int w, int h, string val) { CreateObject(name, OBJ_EDIT, 0, x, y, w, h, clrWhite); ObjectSetString(0, PREF+name, OBJPROP_TEXT, val); }
 void DelPO(ENUM_ORDER_TYPE type) { for(int i=OrdersTotal()-1; i>=0; i--) { ulong t=OrderGetTicket(i); if(OrderSelect(t) && OrderGetString(ORDER_SYMBOL)==_Symbol && OrderGetInteger(ORDER_TYPE)==type) trade.OrderDelete(t); } }
+void ClosePositionsByType(ENUM_POSITION_TYPE type)
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong t = PositionGetTicket(i);
+      if(!PositionSelectByTicket(t)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) != type) continue;
+      trade.PositionClose(t);
+   }
+}
 void CloseAllPositions() { for(int i=PositionsTotal()-1; i>=0; i--) { ulong t=PositionGetTicket(i); if(PositionSelectByTicket(t) && PositionGetString(POSITION_SYMBOL)==_Symbol) trade.PositionClose(t); } }
 void CloseAllOrders() { for(int i=OrdersTotal()-1; i>=0; i--) { ulong t=OrderGetTicket(i); if(OrderSelect(t) && OrderGetString(ORDER_SYMBOL)==_Symbol) trade.OrderDelete(t); } }
 
@@ -664,9 +682,10 @@ int GetInitialY(string name) {
    
    if(name == PREF+"BtnBuyL" || name == PREF+"BtnSellL") return UI_Y + 340;
    if(name == PREF+"DelBuy" || name == PREF+"DelSell") return UI_Y + 380;
-   if(name == PREF+"ClosePos") return UI_Y + 420;
-   if(name == PREF+"CloseOrd") return UI_Y + 460;
-   if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 500;
-   if(name == PREF+"Reset" || name == PREF+"GetNews") return UI_Y + 540;
+   if(name == PREF+"DelBuyPos" || name == PREF+"DelSellPos") return UI_Y + 420;
+   if(name == PREF+"ClosePos") return UI_Y + 460;
+   if(name == PREF+"CloseOrd") return UI_Y + 500;
+   if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 540;
+   if(name == PREF+"Reset" || name == PREF+"GetNews") return UI_Y + 580;
    return UI_Y;
 }
