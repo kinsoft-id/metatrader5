@@ -6,7 +6,8 @@
 #include <Trade\Trade.mqh> 
 
 //--- Input Parameters
-input double InpBasingRatio = 0.63; // Rasio maksimal body candle untuk dianggap Base
+input double InpBasingRatio    = 0.63; // Rasio maksimal body candle untuk Base
+input double InpImpulsiveRatio = 0.55; // Rasio minimal body candle untuk Leg In/Out
 input int    InpMaxBase     = 13;    // Maksimal candle base berurutan
 input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally
 input bool   InpShowDBD     = true;  // Tampilkan Drop Base Drop
@@ -450,12 +451,15 @@ void ScanSD() {
 bool IsImpulsive(int idx) { 
    double body = MathAbs(iClose(_Symbol, _Period, idx) - iOpen(_Symbol, _Period, idx)); 
    double range = MathAbs(iHigh(_Symbol, _Period, idx) - iLow(_Symbol, _Period, idx)); 
-   return (body > (range * InpBasingRatio)); 
+   if(range <= 0.0) return false;
+   return (body > (range * InpImpulsiveRatio)); 
 }
 
 bool IsBasing(int idx) { 
    double body = MathAbs(iClose(_Symbol, _Period, idx) - iOpen(_Symbol, _Period, idx)); 
    double range = MathAbs(iHigh(_Symbol, _Period, idx) - iLow(_Symbol, _Period, idx)); 
+   if(range <= 0.0) return false;
+   if(body > (range * InpImpulsiveRatio)) return false;
    return (body <= (range * InpBasingRatio)); 
 }
 

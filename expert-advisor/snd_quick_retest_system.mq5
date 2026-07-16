@@ -6,7 +6,8 @@
 #include <Trade\Trade.mqh> 
 
 //--- Input Parameters
-input double InpBasingRatio = 0.63; // Rasio maksimal body candle untuk dianggap Base
+input double InpBasingRatio    = 0.63; // Rasio maksimal body candle untuk Base
+input double InpImpulsiveRatio = 0.55; // Rasio minimal body candle untuk Leg In/Out
 input int    InpMaxBase     = 13;    // Maksimal candle base berurutan
 input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally
 input bool   InpShowDBD     = true;  // Tampilkan Drop Base Drop
@@ -446,12 +447,15 @@ void ScanSD() {
 bool IsImpulsive(int idx) { 
    double body = MathAbs(iClose(_Symbol, _Period, idx) - iOpen(_Symbol, _Period, idx)); 
    double range = MathAbs(iHigh(_Symbol, _Period, idx) - iLow(_Symbol, _Period, idx)); 
-   return (body > (range * InpBasingRatio)); 
+   if(range <= 0.0) return false;
+   return (body > (range * InpImpulsiveRatio)); 
 }
 
 bool IsBasing(int idx) { 
    double body = MathAbs(iClose(_Symbol, _Period, idx) - iOpen(_Symbol, _Period, idx)); 
    double range = MathAbs(iHigh(_Symbol, _Period, idx) - iLow(_Symbol, _Period, idx)); 
+   if(range <= 0.0) return false;
+   if(body > (range * InpImpulsiveRatio)) return false;
    return (body <= (range * InpBasingRatio)); 
 }
 
@@ -632,7 +636,7 @@ void CreateDashboard() {
    CreateLabel("Title", (PANEL_W / 2) - 80, HEADER_Y + 2, "SND Quick Retest", clrWhite);
    CreateObject("Panel", OBJ_RECTANGLE_LABEL, 0, 10, UI_Y, PANEL_W, PANEL_H, clrDarkSlateGray);
    
-   CreateLabel("LblLayers", 20, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "5");
+   CreateLabel("LblLayers", 20, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "3");
    CreateLabel("LblLot", 270, UI_Y+12, "Lot", clrOrange); CreateEdit("InpLot", 370, UI_Y+18, 100, 25, "0.01");
 
 //    CreateLabel("LblQuote", 70, UI_Y+45, "Price Attempts to Come Back!", clrBlack);
