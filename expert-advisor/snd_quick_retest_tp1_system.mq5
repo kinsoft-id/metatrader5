@@ -129,7 +129,7 @@ void OnTimer()
    DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
    DrawNativeLabel(PREF + "Quote", "Price Attempts to Come Back!", (PANEL_W + 20), 75, clrBlack);
    DrawNativeLabel(PREF + "Quote2", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 100, clrBlack);
-   DrawNativeLabel(PREF + "Quote3", "Entry Counter Trend 1x entry RR 1:1 Maksimal 2x Pantulan", (PANEL_W + 20), 125, clrBlack);
+   DrawNativeLabel(PREF + "Quote3", "Entry Counter Trend 1x entry, Maksimal 2x Pantulan", (PANEL_W + 20), 125, clrBlack);
    
    ChartRedraw();
 }
