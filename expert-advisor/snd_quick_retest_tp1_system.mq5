@@ -75,7 +75,7 @@ int OnInit()
    
    // Mengatur agar setiap kali EA ini mengirim order, Magic Number langsung terpasang otomatis
    trade.SetExpertMagicNumber(InpMagicNumber);
-   ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrLightGray);
+   ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrWhite);
    ChartSetInteger(0, CHART_COLOR_FOREGROUND, clrBlack);
    ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, clrWhite);
    ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, clrBlack);

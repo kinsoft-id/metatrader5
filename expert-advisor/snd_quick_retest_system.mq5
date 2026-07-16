@@ -74,7 +74,7 @@ int OnInit()
    
    // Mengatur agar setiap kali EA ini mengirim order, Magic Number langsung terpasang otomatis
    trade.SetExpertMagicNumber(InpMagicNumber);
-   ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrLightGray);
+   ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrWhite);
    ChartSetInteger(0, CHART_COLOR_FOREGROUND, clrBlack);
    ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, clrWhite);
    ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, clrBlack);
@@ -346,6 +346,7 @@ void ScanSD() {
             
             bool legInUp  = (iClose(_Symbol, _Period, legInIdx) > iOpen(_Symbol, _Period, legInIdx));
             bool legOutUp = (iClose(_Symbol, _Period, i) > iOpen(_Symbol, _Period, i));
+            double legOutClose = iClose(_Symbol, _Period, i);
             
             string type = "";
             bool shouldDraw = false;
@@ -356,6 +357,10 @@ void ScanSD() {
             if(legInUp && !legOutUp)  { type = "RBD"; shouldDraw = InpShowRBD; }
 
             if(!shouldDraw) continue;
+
+            // RBR: Close Leg Out di atas base | DBD: Close Leg Out di bawah base
+            if(type == "RBR" && legOutClose <= baseHigh) continue;
+            if(type == "DBD" && legOutClose >= baseLow) continue;
 
             // --- KUNCI LOGIKA BARU: MENGHITUNG JUMLAH SENTUHAN (RETEST) ---
             int touchCount = 0;
@@ -451,61 +456,86 @@ bool IsBasing(int idx) {
 }
 
 // --- Logic Trading ---
+double GetSpreadPrice()
+{
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double spread = ask - bid;
+   if(spread <= 0.0)
+      spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * _Point;
+   return spread;
+}
+
+double LayerEntryPrice(double entry1, double distal, int layerIndex, int totalLayers)
+{
+   if(totalLayers <= 1 || layerIndex <= 0) return entry1;
+   if(totalLayers == 2)
+      return entry1 + (distal - entry1) * 0.5;
+   return entry1 + (distal - entry1) * layerIndex / (totalLayers - 1);
+}
+
+double BuyTPByLayer(int layerIndex)
+{
+   if(layerIndex == 0) return GetInputValue("Buy_TP1");
+   if(layerIndex == 1) return GetInputValue("Buy_TP2");
+   if(layerIndex == 2) return GetInputValue("Buy_TP3");
+   double entry1 = GetInputValue("Buy_Entry") + GetSpreadPrice() * 2.0;
+   double sl = GetInputValue("Buy_Stoploss");
+   double risk = entry1 - sl;
+   if(layerIndex == 3) return entry1 + 4.0 * risk;
+   return entry1 + 5.0 * risk;
+}
+
+double SellTPByLayer(int layerIndex)
+{
+   if(layerIndex == 0) return GetInputValue("Sell_TP1");
+   if(layerIndex == 1) return GetInputValue("Sell_TP2");
+   if(layerIndex == 2) return GetInputValue("Sell_TP3");
+   double entry1 = GetInputValue("Sell_Entry") - GetSpreadPrice() * 2.0;
+   double sl = GetInputValue("Sell_Stoploss");
+   double risk = sl - entry1;
+   if(layerIndex == 3) return entry1 - 4.0 * risk;
+   return entry1 - 5.0 * risk;
+}
+
 void PlaceBuyLimit() { 
    int layers = (int)GetInputValue("InpLayers"); 
+   if(layers < 1) layers = 1;
    double lot = GetInputValue("InpLot"); 
-   double entry = GetInputValue("Buy_Entry"); 
+   double proximal = GetInputValue("Buy_Entry"); 
+   double distal = GetInputValue("Buy_Floor");
    double sl = GetInputValue("Buy_Stoploss"); 
-   double risk = entry - sl;
-   double tp1 = GetInputValue("Buy_TP1"); 
-   double tp2 = GetInputValue("Buy_TP2"); 
-   double tp3 = GetInputValue("Buy_TP3"); 
-   double tp4 = entry + (4*risk);
-   double tp5 = entry + (5*risk);
+   double entry1 = proximal + GetSpreadPrice() * 2.0;
 
-   if(entry == 0 || lot == 0) return; 
+   if(proximal == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
-      double tp = tp1;
-      if(i == 1) tp = tp2;
-      else if(i == 2) tp = tp3;
-      else if(i == 3) tp = tp4;
-      else if(i == 4) tp = tp5;
+      double entry = NormalizeDouble(LayerEntryPrice(entry1, distal, i, layers), _Digits);
+      double tp = BuyTPByLayer(i);
       trade.BuyLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Buy L"+IntegerToString(i+1)); 
    } 
 }
 
 void PlaceSellLimit() { 
    int layers = (int)GetInputValue("InpLayers"); 
+   if(layers < 1) layers = 1;
    double lot = GetInputValue("InpLot"); 
-   double entry = GetInputValue("Sell_Entry"); 
+   double proximal = GetInputValue("Sell_Entry"); 
+   double distal = GetInputValue("Sell_Ceiling");
    double sl = GetInputValue("Sell_Stoploss"); 
-   double risk = sl - entry;
-   double tp1 = GetInputValue("Sell_TP1"); 
-   double tp2 = GetInputValue("Sell_TP2"); 
-   double tp3 = GetInputValue("Sell_TP3"); 
-   double tp4 = entry - (4*risk);
-   double tp5 = entry - (5*risk);
-   if(entry == 0 || lot == 0) return; 
+   double entry1 = proximal - GetSpreadPrice() * 2.0;
+
+   if(proximal == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
-      double tp = tp1;
-      if(i == 1) tp = tp2;
-      else if(i == 2) tp = tp3;
-      else if(i == 3) tp = tp4;
-      else if(i == 4) tp = tp5;
+      double entry = NormalizeDouble(LayerEntryPrice(entry1, distal, i, layers), _Digits);
+      double tp = SellTPByLayer(i);
       trade.SellLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Sell L"+IntegerToString(i+1)); 
    } 
 }
 
 void PlaceBuyNow() { 
    double lot = GetInputValue("InpLot");
-   double entry = GetInputValue("Buy_Entry"); 
    double sl = GetInputValue("Buy_Stoploss"); 
-   double risk = entry - sl;
-   double tp1 = GetInputValue("Buy_TP1"); 
-   double tp2 = GetInputValue("Buy_TP2"); 
-   double tp3 = GetInputValue("Buy_TP3"); 
-   double tp4 = entry + (4*risk);
-   double tp5 = entry + (5*risk);
+   double tp5 = BuyTPByLayer(4);
    
    if(lot <= 0) {
       Print("Lot size is zero or negative, cannot execute Buy trade.");
@@ -519,14 +549,8 @@ void PlaceBuyNow() {
 
 void PlaceSellNow() { 
    double lot = GetInputValue("InpLot");
-   double entry = GetInputValue("Sell_Entry"); 
    double sl = GetInputValue("Sell_Stoploss"); 
-   double risk = sl - entry;
-   double tp1 = GetInputValue("Sell_TP1"); 
-   double tp2 = GetInputValue("Sell_TP2"); 
-   double tp3 = GetInputValue("Sell_TP3"); 
-   double tp4 = entry - (4*risk);
-   double tp5 = entry - (5*risk);
+   double tp5 = SellTPByLayer(4);
    
    if(lot <= 0) {
       Print("Lot size is zero or negative, cannot execute Sell trade.");
@@ -545,22 +569,39 @@ void CalculateAndDrawAll() {
    double pCeiling = ObjectGetDouble(0, PREF+"Line_Ceiling", OBJPROP_PRICE);
    double range = MathAbs(pCeiling - pFloor);
    double buffer = 0.3 * range;
-   double bEntry = pCeiling; double bSL = pFloor - buffer; double bRisk = bEntry - bSL;
-   double sEntry = pFloor; double sSL = pCeiling + buffer; double sRisk = sSL - sEntry;
+   double spreadBuf = GetSpreadPrice() * 2.0;
+   double bEntry = pCeiling;
+   double bEntry1 = bEntry + spreadBuf;
+   double bSL = pFloor - buffer;
+   double bRisk = bEntry1 - bSL;
+   double sEntry = pFloor;
+   double sEntry1 = sEntry - spreadBuf;
+   double sSL = pCeiling + buffer;
+   double sRisk = sSL - sEntry1;
    
    ObjectsDeleteAll(0, PREF+"Calc_");
    UpdateLine(PREF+"Calc_B_SL", bSL, clrBlue);
    UpdateLine(PREF+"Calc_S_SL", sSL, clrRed); 
 
-   UpdateLine(PREF+"Calc_B_TP1", bEntry + bRisk, clrGreen); UpdateLine(PREF+"Calc_B_TP2", bEntry + (2 * bRisk), clrGreen); UpdateLine(PREF+"Calc_B_TP3", bEntry + (3 * bRisk), clrGreen);
-   UpdateLine(PREF+"Calc_B_TP4", bEntry + (4 * bRisk), clrGreen); UpdateLine(PREF+"Calc_B_TP5", bEntry + (5 * bRisk), clrGreen);
-   UpdateLine(PREF+"Calc_S_TP1", sEntry - sRisk, clrGreen); UpdateLine(PREF+"Calc_S_TP2", sEntry - (2 * sRisk), clrGreen); UpdateLine(PREF+"Calc_S_TP3", sEntry - (3 * sRisk), clrGreen);
-   UpdateLine(PREF+"Calc_S_TP4", sEntry - (4 * sRisk), clrGreen); UpdateLine(PREF+"Calc_S_TP5", sEntry - (5 * sRisk), clrGreen);
+   UpdateLine(PREF+"Calc_B_TP1", bEntry1 + bRisk, clrGreen);
+   UpdateLine(PREF+"Calc_B_TP2", bEntry1 + (2 * bRisk), clrGreen);
+   UpdateLine(PREF+"Calc_B_TP3", bEntry1 + (3 * bRisk), clrGreen);
+   UpdateLine(PREF+"Calc_B_TP4", bEntry1 + (4 * bRisk), clrGreen);
+   UpdateLine(PREF+"Calc_B_TP5", bEntry1 + (5 * bRisk), clrGreen);
+   UpdateLine(PREF+"Calc_S_TP1", sEntry1 - sRisk, clrGreen);
+   UpdateLine(PREF+"Calc_S_TP2", sEntry1 - (2 * sRisk), clrGreen);
+   UpdateLine(PREF+"Calc_S_TP3", sEntry1 - (3 * sRisk), clrGreen);
+   UpdateLine(PREF+"Calc_S_TP4", sEntry1 - (4 * sRisk), clrGreen);
+   UpdateLine(PREF+"Calc_S_TP5", sEntry1 - (5 * sRisk), clrGreen);
    
    UpdateInput("Buy_Floor", pFloor); UpdateInput("Buy_Entry", bEntry); UpdateInput("Buy_Stoploss", bSL); 
-   UpdateInput("Buy_TP1", bEntry+bRisk); UpdateInput("Buy_TP2", bEntry+(2*bRisk)); UpdateInput("Buy_TP3", bEntry+(3*bRisk));
+   UpdateInput("Buy_TP1", bEntry1 + bRisk);
+   UpdateInput("Buy_TP2", bEntry1 + (2 * bRisk));
+   UpdateInput("Buy_TP3", bEntry1 + (3 * bRisk));
    UpdateInput("Sell_Ceiling", pCeiling); UpdateInput("Sell_Entry", sEntry); UpdateInput("Sell_Stoploss", sSL); 
-   UpdateInput("Sell_TP1", sEntry-sRisk); UpdateInput("Sell_TP2", sEntry-(2*sRisk)); UpdateInput("Sell_TP3", sEntry-(3*sRisk));
+   UpdateInput("Sell_TP1", sEntry1 - sRisk);
+   UpdateInput("Sell_TP2", sEntry1 - (2 * sRisk));
+   UpdateInput("Sell_TP3", sEntry1 - (3 * sRisk));
 
    // Kalkulasi ukuran pips dinamis
    double pipSize = (_Digits == 3 || _Digits == 5) ? _Point * 10 : _Point;
