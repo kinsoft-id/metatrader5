@@ -470,11 +470,19 @@ double GetSpreadPrice()
    return spread;
 }
 
-double LayerEntryPrice(double proximal, double distal, int layerIndex, int totalLayers)
+// entry1 = proximal + buffer (BUY) / proximal - buffer (SELL)
+// Layers 1: hanya entry1
+// Layers 2: L2 di tengah entry1 dan distal
+// Layers >= 3: bagi rata dari entry1 sampai distal (L terakhir = distal)
+double LayerEntryPrice(double entry1, double distal, int layerIndex, int totalLayers)
 {
-   if(totalLayers <= 1) return proximal;
-   // L1=proximal, layer berikutnya dibagi rata menuju distal (L2=tengah saat total=2)
-   return proximal + (distal - proximal) * layerIndex / totalLayers;
+   if(totalLayers <= 1 || layerIndex <= 0) return entry1;
+
+   if(totalLayers == 2)
+      return entry1 + (distal - entry1) * 0.5;
+
+   // layers >= 3: bagi rata antara entry1 dan distal
+   return entry1 + (distal - entry1) * layerIndex / (totalLayers - 1);
 }
 
 void PlaceBuyLimit() { 
@@ -485,12 +493,12 @@ void PlaceBuyLimit() {
    double distal = GetInputValue("Buy_Floor");
    double sl = GetInputValue("Buy_Stoploss"); 
    double tp1 = GetInputValue("Buy_TP1"); 
-   double spreadBuf = GetSpreadPrice();
+   // Buffer spread hanya di entry pertama
+   double entry1 = proximal + GetSpreadPrice();
 
    if(proximal == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
-      // Buy Limit + spread agar Ask menyentuh entry saat Bid retest area
-      double entry = NormalizeDouble(LayerEntryPrice(proximal, distal, i, layers) + spreadBuf, _Digits);
+      double entry = NormalizeDouble(LayerEntryPrice(entry1, distal, i, layers), _Digits);
       trade.BuyLimit(lot, entry, _Symbol, sl, tp1, ORDER_TIME_GTC, 0, "Buy L"+IntegerToString(i+1)); 
    } 
 }
@@ -503,12 +511,12 @@ void PlaceSellLimit() {
    double distal = GetInputValue("Sell_Ceiling");
    double sl = GetInputValue("Sell_Stoploss"); 
    double tp1 = GetInputValue("Sell_TP1"); 
-   double spreadBuf = GetSpreadPrice();
+   // Buffer spread hanya di entry pertama
+   double entry1 = proximal - GetSpreadPrice();
 
    if(proximal == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
-      // Sell Limit - spread agar Bid menyentuh entry saat Ask retest area
-      double entry = NormalizeDouble(LayerEntryPrice(proximal, distal, i, layers) - spreadBuf, _Digits);
+      double entry = NormalizeDouble(LayerEntryPrice(entry1, distal, i, layers), _Digits);
       trade.SellLimit(lot, entry, _Symbol, sl, tp1, ORDER_TIME_GTC, 0, "Sell L"+IntegerToString(i+1)); 
    } 
 }
