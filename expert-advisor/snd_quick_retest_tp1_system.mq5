@@ -470,7 +470,7 @@ double GetSpreadPrice()
    return spread;
 }
 
-// entry1 = proximal + buffer (BUY) / proximal - buffer (SELL)
+// entry1 = proximal + 2x spread (BUY) / proximal - 2x spread (SELL)
 // Layers 1: hanya entry1
 // Layers 2: L2 di tengah entry1 dan distal
 // Layers >= 3: bagi rata dari entry1 sampai distal (L terakhir = distal)
@@ -493,8 +493,8 @@ void PlaceBuyLimit() {
    double distal = GetInputValue("Buy_Floor");
    double sl = GetInputValue("Buy_Stoploss"); 
    double tp1 = GetInputValue("Buy_TP1"); 
-   // Buffer spread hanya di entry pertama
-   double entry1 = proximal + GetSpreadPrice();
+   // Buffer 2x spread hanya di entry pertama
+   double entry1 = proximal + GetSpreadPrice() * 2.0;
 
    if(proximal == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
@@ -511,8 +511,8 @@ void PlaceSellLimit() {
    double distal = GetInputValue("Sell_Ceiling");
    double sl = GetInputValue("Sell_Stoploss"); 
    double tp1 = GetInputValue("Sell_TP1"); 
-   // Buffer spread hanya di entry pertama
-   double entry1 = proximal - GetSpreadPrice();
+   // Buffer 2x spread hanya di entry pertama
+   double entry1 = proximal - GetSpreadPrice() * 2.0;
 
    if(proximal == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
@@ -558,20 +558,27 @@ void CalculateAndDrawAll() {
    double pCeiling = ObjectGetDouble(0, PREF+"Line_Ceiling", OBJPROP_PRICE);
    double range = MathAbs(pCeiling - pFloor);
    double buffer = 0.3 * range;
-   double bEntry = pCeiling; double bSL = pFloor - buffer; double bRisk = bEntry - bSL;
-   double sEntry = pFloor; double sSL = pCeiling + buffer; double sRisk = sSL - sEntry;
+   double spreadBuf = GetSpreadPrice() * 2.0;
+   double bEntry = pCeiling;
+   double bEntry1 = bEntry + spreadBuf;
+   double bSL = pFloor - buffer;
+   double bRisk = bEntry1 - bSL;
+   double sEntry = pFloor;
+   double sEntry1 = sEntry - spreadBuf;
+   double sSL = pCeiling + buffer;
+   double sRisk = sSL - sEntry1;
    
    ObjectsDeleteAll(0, PREF+"Calc_");
    UpdateLine(PREF+"Calc_B_SL", bSL, clrBlue);
    UpdateLine(PREF+"Calc_S_SL", sSL, clrRed); 
 
-   UpdateLine(PREF+"Calc_B_TP1", bEntry + bRisk, clrGreen);
-   UpdateLine(PREF+"Calc_S_TP1", sEntry - sRisk, clrGreen);
+   UpdateLine(PREF+"Calc_B_TP1", bEntry1 + bRisk, clrGreen);
+   UpdateLine(PREF+"Calc_S_TP1", sEntry1 - sRisk, clrGreen);
    
    UpdateInput("Buy_Floor", pFloor); UpdateInput("Buy_Entry", bEntry); UpdateInput("Buy_Stoploss", bSL); 
-   UpdateInput("Buy_TP1", bEntry+bRisk);
+   UpdateInput("Buy_TP1", bEntry1 + bRisk);
    UpdateInput("Sell_Ceiling", pCeiling); UpdateInput("Sell_Entry", sEntry); UpdateInput("Sell_Stoploss", sSL); 
-   UpdateInput("Sell_TP1", sEntry-sRisk);
+   UpdateInput("Sell_TP1", sEntry1 - sRisk);
 
    // Kalkulasi ukuran pips dinamis
    double pipSize = (_Digits == 3 || _Digits == 5) ? _Point * 10 : _Point;
