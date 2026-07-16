@@ -349,6 +349,7 @@ void ScanSD() {
             
             bool legInUp  = (iClose(_Symbol, _Period, legInIdx) > iOpen(_Symbol, _Period, legInIdx));
             bool legOutUp = (iClose(_Symbol, _Period, i) > iOpen(_Symbol, _Period, i));
+            double legOutClose = iClose(_Symbol, _Period, i);
             
             string type = "";
             bool shouldDraw = false;
@@ -359,6 +360,11 @@ void ScanSD() {
             if(legInUp && !legOutUp)  { type = "RBD"; shouldDraw = InpShowRBD; }
 
             if(!shouldDraw) continue;
+
+            // RBR: Close Leg Out di atas base (departure ke atas)
+            // DBD: Close Leg Out di bawah base (departure ke bawah)
+            if(type == "RBR" && legOutClose <= baseHigh) continue;
+            if(type == "DBD" && legOutClose >= baseLow) continue;
 
             // --- KUNCI LOGIKA BARU: MENGHITUNG JUMLAH SENTUHAN (RETEST) ---
             int touchCount = 0;
