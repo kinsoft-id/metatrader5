@@ -35,7 +35,7 @@ bool IsDashboardVisible = true;
 bool IsSDScanning = false;
 int UI_Y = 100;      
 int HEADER_Y = 50;   
-int PANEL_W = 500;   
+int PANEL_W = 580;   
 int PANEL_H = 730;   
 int UI_OFFSCREEN = -2000; 
 
@@ -582,38 +582,43 @@ void CalculateAndDrawAll() {
 }
 
 void CreateDashboard() {
+   int leftX  = 20;
+   int rightX = 305;
+   int btnW   = 255;
+   int fullW  = PANEL_W - 40;
+
    CreateObject("HdrPanel", OBJ_RECTANGLE_LABEL, 0, 10, HEADER_Y, PANEL_W, 40, clrBlack);
    ObjectSetInteger(0, PREF+"HdrPanel", OBJPROP_BGCOLOR, clrDarkSlateGray);
    CreateButton("Hide", 15, HEADER_Y + 7, 50, 25, "Hide", clrGray, clrWhite);
    CreateLabel("Title", (PANEL_W / 2) - 80, HEADER_Y + 2, "SND Quick Retest TP1", clrWhite);
    CreateObject("Panel", OBJ_RECTANGLE_LABEL, 0, 10, UI_Y, PANEL_W, PANEL_H, clrDarkSlateGray);
    
-   CreateLabel("LblLayers", 20, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "4");
-   CreateLabel("LblLot", 270, UI_Y+12, "Lot", clrOrange); CreateEdit("InpLot", 370, UI_Y+18, 100, 25, "0.01");
+   CreateLabel("LblLayers", leftX, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", leftX+100, UI_Y+18, 120, 25, "4");
+   CreateLabel("LblLot", rightX, UI_Y+12, "Lot", clrOrange); CreateEdit("InpLot", rightX+100, UI_Y+18, 120, 25, "0.01");
 
 //    CreateLabel("LblQuote", 70, UI_Y+45, "Price Attempts to Come Back!", clrBlack);
    
-   CreateButton("BtnDraw", 20, UI_Y+80, 180, 30, "Draw Line", clrPurple, clrWhite);
-   CreateButton("BtnScanSD", 270, UI_Y+80, 180, 30, "Scan S&D", clrDarkGreen, clrWhite);
+   CreateButton("BtnDraw", leftX, UI_Y+80, btnW, 32, "Draw Line", clrPurple, clrWhite);
+   CreateButton("BtnScanSD", rightX, UI_Y+80, btnW, 32, "Scan S&D", clrDarkGreen, clrWhite);
    
    string bL[]={"Floor","Entry","Stoploss","TP1","Area","Risk"}; 
    string sL[]={"Ceiling","Entry","Stoploss","TP1","Area","Risk"};
    for(int i=0; i<6; i++) {
-      CreateLabel("LB_"+bL[i], 20, UI_Y+130+(i*30), bL[i], clrOrange); CreateEdit("Buy_"+bL[i], 130, UI_Y+134+(i*30), 110, 25, "0.00");
-      CreateLabel("LS_"+sL[i], 270, UI_Y+130+(i*30), sL[i], clrOrange); CreateEdit("Sell_"+sL[i], 370, UI_Y+134+(i*30), 110, 25, "0.00");
+      CreateLabel("LB_"+bL[i], leftX, UI_Y+130+(i*30), bL[i], clrOrange); CreateEdit("Buy_"+bL[i], leftX+100, UI_Y+134+(i*30), 130, 25, "0.00");
+      CreateLabel("LS_"+sL[i], rightX, UI_Y+130+(i*30), sL[i], clrOrange); CreateEdit("Sell_"+sL[i], rightX+100, UI_Y+134+(i*30), 130, 25, "0.00");
    }
-   CreateButton("BtnBuyL", 20, UI_Y + 340, 200, 30, "Buy Limit", clrBlue, clrWhite);
-   CreateButton("BtnSellL", 270, UI_Y + 340, 200, 30, "Sell Limit", clrOrange, clrWhite);
-   CreateButton("DelBuy", 20, UI_Y + 380, 200, 30, "Del Buy Order", clrBlue, clrWhite);
-   CreateButton("DelSell", 270, UI_Y + 380, 200, 30, "Del Sell Order", clrBrown, clrWhite);
-   CreateButton("DelBuyPos", 20, UI_Y + 420, 200, 30, "Del Buy Position", clrDodgerBlue, clrWhite);
-   CreateButton("DelSellPos", 270, UI_Y + 420, 200, 30, "Del Sell Position", clrOrangeRed, clrWhite);
-   CreateButton("ClosePos", 20, UI_Y + 460, PANEL_W-40, 30, "Close Positions", clrDarkRed, clrWhite);
-   CreateButton("CloseOrd", 20, UI_Y + 500, PANEL_W-40, 30, "Close All Orders", clrMaroon, clrWhite);
-   CreateButton("BuyNow", 20, UI_Y + 540, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
-   CreateButton("SellNow", 270, UI_Y + 540, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
-   CreateButton("GetNews", 20, UI_Y + 580, 200, 30, "Get News", clrGray, clrBlack);
-   CreateButton("Reset", 270, UI_Y + 580, 200, 30, "Reset", clrGray, clrBlack);
+   CreateButton("BtnBuyL", leftX, UI_Y + 340, btnW, 34, "Buy Limit", clrBlue, clrWhite);
+   CreateButton("BtnSellL", rightX, UI_Y + 340, btnW, 34, "Sell Limit", clrOrange, clrWhite);
+   CreateButton("DelBuy", leftX, UI_Y + 380, btnW, 34, "Del Buy Order", clrBlue, clrWhite);
+   CreateButton("DelSell", rightX, UI_Y + 380, btnW, 34, "Del Sell Order", clrBrown, clrWhite);
+   CreateButton("DelBuyPos", leftX, UI_Y + 420, btnW, 34, "Del Buy Position", clrDodgerBlue, clrWhite);
+   CreateButton("DelSellPos", rightX, UI_Y + 420, btnW, 34, "Del Sell Position", clrOrangeRed, clrWhite);
+   CreateButton("ClosePos", leftX, UI_Y + 460, fullW, 34, "Close Positions", clrDarkRed, clrWhite);
+   CreateButton("CloseOrd", leftX, UI_Y + 500, fullW, 34, "Close All Orders", clrMaroon, clrWhite);
+   CreateButton("BuyNow", leftX, UI_Y + 540, btnW, 34, "Buy Now", clrDodgerBlue, clrWhite);
+   CreateButton("SellNow", rightX, UI_Y + 540, btnW, 34, "Sell Now", clrOrangeRed, clrWhite);
+   CreateButton("GetNews", leftX, UI_Y + 580, btnW, 34, "Get News", clrGray, clrBlack);
+   CreateButton("Reset", rightX, UI_Y + 580, btnW, 34, "Reset", clrGray, clrBlack);
 
    // Tambahkan ini di setiap fungsi pembuatan tombol/label dashboard Anda
    ObjectSetInteger(0, "BtnBuyL", OBJPROP_ZORDER, 10);
