@@ -6,7 +6,7 @@
 #include <Trade\Trade.mqh> 
 
 //--- Input Parameters
-input double InpBasingRatio    = 0.63; // Rasio maksimal body candle untuk Base
+input double InpBasingRatio    = 0.618; // Rasio maksimal body candle untuk Base
 input double InpImpulsiveRatio = 0.55; // Rasio minimal body candle untuk Leg In/Out
 input int    InpMaxBase     = 13;    // Maksimal candle base berurutan
 input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally

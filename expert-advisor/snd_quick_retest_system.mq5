@@ -6,7 +6,7 @@
 #include <Trade\Trade.mqh> 
 
 //--- Input Parameters
-input double InpBasingRatio    = 0.63; // Rasio maksimal body candle untuk Base
+input double InpBasingRatio    = 0.618; // Rasio maksimal body candle untuk Base
 input double InpImpulsiveRatio = 0.55; // Rasio minimal body candle untuk Leg In/Out
 input int    InpMaxBase     = 13;    // Maksimal candle base berurutan
 input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally
@@ -470,36 +470,26 @@ double GetSpreadPrice()
    return spread;
 }
 
-double LayerEntryPrice(double entry1, double distal, int layerIndex, int totalLayers)
+double BuyTPByLayer(int layerIndex, double entry, double sl)
 {
-   if(totalLayers <= 1 || layerIndex <= 0) return entry1;
-   if(totalLayers == 2)
-      return entry1 + (distal - entry1) * 0.5;
-   return entry1 + (distal - entry1) * layerIndex / (totalLayers - 1);
-}
-
-double BuyTPByLayer(int layerIndex)
-{
+   double risk = entry - sl;
+   if(risk <= 0.0) return 0.0;
    if(layerIndex == 0) return GetInputValue("Buy_TP1");
    if(layerIndex == 1) return GetInputValue("Buy_TP2");
    if(layerIndex == 2) return GetInputValue("Buy_TP3");
-   double entry1 = GetInputValue("Buy_Entry") + GetSpreadPrice() * 2.0;
-   double sl = GetInputValue("Buy_Stoploss");
-   double risk = entry1 - sl;
-   if(layerIndex == 3) return entry1 + 4.0 * risk;
-   return entry1 + 5.0 * risk;
+   if(layerIndex == 3) return entry + 4.0 * risk;
+   return entry + 5.0 * risk;
 }
 
-double SellTPByLayer(int layerIndex)
+double SellTPByLayer(int layerIndex, double entry, double sl)
 {
+   double risk = sl - entry;
+   if(risk <= 0.0) return 0.0;
    if(layerIndex == 0) return GetInputValue("Sell_TP1");
    if(layerIndex == 1) return GetInputValue("Sell_TP2");
    if(layerIndex == 2) return GetInputValue("Sell_TP3");
-   double entry1 = GetInputValue("Sell_Entry") - GetSpreadPrice() * 2.0;
-   double sl = GetInputValue("Sell_Stoploss");
-   double risk = sl - entry1;
-   if(layerIndex == 3) return entry1 - 4.0 * risk;
-   return entry1 - 5.0 * risk;
+   if(layerIndex == 3) return entry - 4.0 * risk;
+   return entry - 5.0 * risk;
 }
 
 void PlaceBuyLimit() { 
@@ -507,14 +497,13 @@ void PlaceBuyLimit() {
    if(layers < 1) layers = 1;
    double lot = GetInputValue("InpLot"); 
    double proximal = GetInputValue("Buy_Entry"); 
-   double distal = GetInputValue("Buy_Floor");
    double sl = GetInputValue("Buy_Stoploss"); 
-   double entry1 = proximal + GetSpreadPrice() * 2.0;
+   // Semua layer entry di harga yang sama; SL satu; TP dinamis per layer
+   double entry = NormalizeDouble(proximal + GetSpreadPrice() * 2.0, _Digits);
 
    if(proximal == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
-      double entry = NormalizeDouble(LayerEntryPrice(entry1, distal, i, layers), _Digits);
-      double tp = BuyTPByLayer(i);
+      double tp = BuyTPByLayer(i, entry, sl);
       trade.BuyLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Buy L"+IntegerToString(i+1)); 
    } 
 }
@@ -524,22 +513,22 @@ void PlaceSellLimit() {
    if(layers < 1) layers = 1;
    double lot = GetInputValue("InpLot"); 
    double proximal = GetInputValue("Sell_Entry"); 
-   double distal = GetInputValue("Sell_Ceiling");
    double sl = GetInputValue("Sell_Stoploss"); 
-   double entry1 = proximal - GetSpreadPrice() * 2.0;
+   // Semua layer entry di harga yang sama; SL satu; TP dinamis per layer
+   double entry = NormalizeDouble(proximal - GetSpreadPrice() * 2.0, _Digits);
 
    if(proximal == 0 || lot == 0) return; 
    for(int i=0; i<layers; i++) { 
-      double entry = NormalizeDouble(LayerEntryPrice(entry1, distal, i, layers), _Digits);
-      double tp = SellTPByLayer(i);
+      double tp = SellTPByLayer(i, entry, sl);
       trade.SellLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Sell L"+IntegerToString(i+1)); 
    } 
 }
 
 void PlaceBuyNow() { 
    double lot = GetInputValue("InpLot");
-   double sl = GetInputValue("Buy_Stoploss"); 
-   double tp5 = BuyTPByLayer(4);
+   double sl = GetInputValue("Buy_Stoploss");
+   double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double tp5 = BuyTPByLayer(4, entry, sl);
    
    if(lot <= 0) {
       Print("Lot size is zero or negative, cannot execute Buy trade.");
@@ -553,8 +542,9 @@ void PlaceBuyNow() {
 
 void PlaceSellNow() { 
    double lot = GetInputValue("InpLot");
-   double sl = GetInputValue("Sell_Stoploss"); 
-   double tp5 = SellTPByLayer(4);
+   double sl = GetInputValue("Sell_Stoploss");
+   double entry = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double tp5 = SellTPByLayer(4, entry, sl);
    
    if(lot <= 0) {
       Print("Lot size is zero or negative, cannot execute Sell trade.");
