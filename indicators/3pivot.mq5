@@ -1,5 +1,5 @@
 #property copyright "3 Pivot"
-#property version   "1.91"
+#property version   "1.93"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -28,9 +28,7 @@ PivotPoint g_last[MAX_PIVOTS];
 int        g_lastCount = 0;
 PivotPoint g_active;
 bool       g_hasActive = false;
-PivotPoint g_breakFrom;
-PivotPoint g_breakTo;
-bool       g_hasBreak = false;
+bool       g_hasActiveLine = false;
 datetime   g_lastBarTime = 0;
 
 void OnDeinit(const int reason)
@@ -38,7 +36,7 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, PREFIX);
    g_lastCount = 0;
    g_hasActive = false;
-   g_hasBreak = false;
+   g_hasActiveLine = false;
    g_lastBarTime = 0;
 }
 
@@ -109,7 +107,6 @@ void EnsureLine(const string name, const PivotPoint &from, const PivotPoint &to)
    if(ObjectFind(0, name) < 0)
    {
       ObjectCreate(0, name, OBJ_TREND, 0, from.time, from.price, to.time, to.price);
-      ObjectSetInteger(0, name, OBJPROP_COLOR, InpLineColor);
       ObjectSetInteger(0, name, OBJPROP_WIDTH, InpLineWidth);
       ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
       ObjectSetInteger(0, name, OBJPROP_RAY_LEFT, false);
@@ -173,8 +170,13 @@ void EnsureFiboOnLine(const int lineNo, const PivotPoint &from, const PivotPoint
 
 void UpdateObjects(const PivotPoint &pivots[], const int count,
                    const PivotPoint &active, const bool hasActive,
-                   const PivotPoint &breakFrom, const PivotPoint &breakTo, const bool hasBreak)
+                   const bool hasActiveLine)
 {
+   // Hapus objek lastClosed lama jika masih ada
+   ObjectDelete(0, PREFIX + "PT_BREAK");
+   ObjectDelete(0, PREFIX + "LN_BREAK");
+   ObjectDelete(0, PREFIX + "FIBO_BREAK");
+
    for(int k = 0; k < count; k++)
    {
       EnsurePoint(k, pivots[k]);
@@ -192,32 +194,22 @@ void UpdateObjects(const PivotPoint &pivots[], const int count,
    else
       ObjectDelete(0, PREFIX + "FIBO3");
 
-   // Zigzag aktif: swing terakhir → ekstrem berjalan
-   if(hasActive && count > 0)
-   {
+   // Titik ekstrem aktif selalu ditampilkan
+   if(hasActive)
       EnsurePoint(PREFIX + "PT_ACTIVE", active);
+   else
+      ObjectDelete(0, PREFIX + "PT_ACTIVE");
+
+   // Garis/fibo ke ekstrem hanya setelah break swing lawan
+   if(hasActive && hasActiveLine && count > 0)
+   {
       EnsureLine(PREFIX + "LN_ACTIVE", pivots[count - 1], active);
       EnsureFiboOnLine(PREFIX + "FIBO_ACTIVE", pivots[count - 1], active);
    }
    else
    {
-      ObjectDelete(0, PREFIX + "PT_ACTIVE");
       ObjectDelete(0, PREFIX + "LN_ACTIVE");
       ObjectDelete(0, PREFIX + "FIBO_ACTIVE");
-   }
-
-   // Langkah 5: garis ekstrem → high/low lastClosed jika break a atau b
-   if(hasBreak)
-   {
-      EnsurePoint(PREFIX + "PT_BREAK", breakTo);
-      EnsureLine(PREFIX + "LN_BREAK", breakFrom, breakTo);
-      EnsureFiboOnLine(PREFIX + "FIBO_BREAK", breakFrom, breakTo);
-   }
-   else
-   {
-      ObjectDelete(0, PREFIX + "PT_BREAK");
-      ObjectDelete(0, PREFIX + "LN_BREAK");
-      ObjectDelete(0, PREFIX + "FIBO_BREAK");
    }
 
    for(int k = count; k < MAX_PIVOTS; k++)
@@ -272,77 +264,15 @@ void StartOppositeExtreme(const int pivotIdx,
    hasExtreme = true;
 }
 
-// Cari swing terdekat ke lastClosed (pivot terkonfirmasi + ekstrem aktif)
-bool FindNearestSwing(const PivotPoint &pivots[], const int count,
-                      const PivotPoint &active, const bool hasActive,
-                      const datetime lastClosedTime,
-                      PivotPoint &nearest)
-{
-   bool found = false;
-   datetime bestTime = 0;
-
-   for(int i = 0; i < count; i++)
-   {
-      if(pivots[i].time <= lastClosedTime && pivots[i].time >= bestTime)
-      {
-         nearest = pivots[i];
-         bestTime = pivots[i].time;
-         found = true;
-      }
-   }
-
-   if(hasActive && active.time <= lastClosedTime && active.time >= bestTime)
-   {
-      nearest = active;
-      found = true;
-   }
-
-   return found;
-}
-
-// Swing lawan terakhir sebelum swing terdekat
-bool FindOppositeSwing(const PivotPoint &pivots[], const int count,
-                       const PivotPoint &active, const bool hasActive,
-                       const PivotPoint &nearest,
-                       PivotPoint &opposite)
-{
-   bool found = false;
-   datetime bestTime = 0;
-
-   for(int i = 0; i < count; i++)
-   {
-      if(pivots[i].isHigh == nearest.isHigh)
-         continue;
-      if(pivots[i].time >= nearest.time)
-         continue;
-      if(pivots[i].time >= bestTime)
-      {
-         opposite = pivots[i];
-         bestTime = pivots[i].time;
-         found = true;
-      }
-   }
-
-   // Aktif hanya bisa jadi opposite jika tipenya lawan & sebelum nearest
-   if(hasActive && active.isHigh != nearest.isHigh && active.time < nearest.time)
-   {
-      if(!found || active.time >= bestTime)
-      {
-         opposite = active;
-         found = true;
-      }
-   }
-
-   return found;
-}
-
 // Pivot LOW:
 // 1. Lacak candle terendah (extreme)
 // 2. a = pertama close > high titik low
 // 3. b = setelah a (+1,+2,...), wajib close > close a
 // 4. Jika a ada, b belum valid, muncul low baru → hapus a, ganti extreme, ulang langkah 2
-// 5. Garis lastClosed: hanya jika swing terdekat = low lalu break swing high
-//    (atau swing terdekat = high lalu break swing low)
+// 5. Garis ke titik ekstrem aktif:
+//    - cari swing terdekat ke ekstrem aktif
+//    - terdekat = LOW  → garis setelah break swing HIGH → ke high ekstrem
+//    - terdekat = HIGH → garis setelah break swing LOW  → ke low ekstrem
 void BuildPivots(const int rates_total,
                  const datetime &time[],
                  const double &high[],
@@ -352,13 +282,11 @@ void BuildPivots(const int rates_total,
                  int &count,
                  PivotPoint &active,
                  bool &hasActive,
-                 PivotPoint &breakFrom,
-                 PivotPoint &breakTo,
-                 bool &hasBreak)
+                 bool &hasActiveLine)
 {
    count = 0;
    hasActive = false;
-   hasBreak = false;
+   hasActiveLine = false;
    if(rates_total < 4)
       return;
 
@@ -439,7 +367,7 @@ void BuildPivots(const int rates_total,
       }
    }
 
-   // Swing aktif: pivot terakhir → ekstrem berjalan
+   // Titik ekstrem aktif
    if(hasExtreme && count > 0)
    {
       active.time   = time[extreme];
@@ -449,38 +377,30 @@ void BuildPivots(const int rates_total,
          hasActive = true;
    }
 
-   // 5: garis lastClosed hanya setelah break swing lawan dari swing terdekat
-   PivotPoint nearest, opposite;
-   if(!FindNearestSwing(pivots, count, active, hasActive, time[lastClosed], nearest))
-      return;
-   if(!FindOppositeSwing(pivots, count, active, hasActive, nearest, opposite))
-      return;
-   if(time[lastClosed] <= nearest.time)
+   if(!hasActive || count < 2)
       return;
 
+   // Swing terdekat ke titik ekstrem aktif = pivot terkonfirmasi terakhir
+   const PivotPoint nearest  = pivots[count - 1];
+   const PivotPoint opposite = pivots[count - 2];
+
+   if(nearest.time >= active.time)
+      return;
+   if(nearest.isHigh == opposite.isHigh)
+      return;
+
+   // Break dicek dari close lastClosed terhadap swing lawan
    if(!nearest.isHigh)
    {
-      // Swing terdekat = LOW → baru tampil jika break swing HIGH
-      if(opposite.isHigh && BodyBreakUp(close[lastClosed], opposite.price))
-      {
-         breakFrom = nearest;
-         breakTo.time   = time[lastClosed];
-         breakTo.price  = high[lastClosed];
-         breakTo.isHigh = true;
-         hasBreak = true;
-      }
+      // Swing terdekat = LOW → garis ke high ekstrem setelah break swing HIGH
+      if(active.isHigh && opposite.isHigh && BodyBreakUp(close[lastClosed], opposite.price))
+         hasActiveLine = true;
    }
    else
    {
-      // Swing terdekat = HIGH → baru tampil jika break swing LOW
-      if(!opposite.isHigh && BodyBreakDown(close[lastClosed], opposite.price))
-      {
-         breakFrom = nearest;
-         breakTo.time   = time[lastClosed];
-         breakTo.price  = low[lastClosed];
-         breakTo.isHigh = false;
-         hasBreak = true;
-      }
+      // Swing terdekat = HIGH → garis ke low ekstrem setelah break swing LOW
+      if(!active.isHigh && !opposite.isHigh && BodyBreakDown(close[lastClosed], opposite.price))
+         hasActiveLine = true;
    }
 }
 
@@ -510,19 +430,16 @@ int OnCalculate(const int rates_total,
    int count = 0;
    PivotPoint active;
    bool hasActive = false;
-   PivotPoint breakFrom, breakTo;
-   bool hasBreak = false;
+   bool hasActiveLine = false;
    BuildPivots(rates_total, time, high, low, close, pivots, count,
-               active, hasActive, breakFrom, breakTo, hasBreak);
+               active, hasActive, hasActiveLine);
 
    bool changed = PivotsChanged(g_last, g_lastCount, pivots, count);
    if(!changed)
    {
-      if(hasActive != g_hasActive || hasBreak != g_hasBreak)
+      if(hasActive != g_hasActive || hasActiveLine != g_hasActiveLine)
          changed = true;
       else if(hasActive && !SamePivot(active, g_active))
-         changed = true;
-      else if(hasBreak && (!SamePivot(breakFrom, g_breakFrom) || !SamePivot(breakTo, g_breakTo)))
          changed = true;
    }
 
@@ -534,10 +451,8 @@ int OnCalculate(const int rates_total,
    g_lastCount = count;
    g_active = active;
    g_hasActive = hasActive;
-   g_breakFrom = breakFrom;
-   g_breakTo = breakTo;
-   g_hasBreak = hasBreak;
+   g_hasActiveLine = hasActiveLine;
 
-   UpdateObjects(pivots, count, active, hasActive, breakFrom, breakTo, hasBreak);
+   UpdateObjects(pivots, count, active, hasActive, hasActiveLine);
    return rates_total;
 }
