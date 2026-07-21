@@ -1,17 +1,17 @@
 #property copyright "3 Pivot"
-#property version   "1.90"
+#property version   "1.91"
 #property indicator_chart_window
 #property indicator_plots 0
 
 input group "Display"
 input color InpHighColor = clrDodgerBlue;
 input color InpLowColor  = clrOrangeRed;
-input color InpLineColor = clrSilver;
+input color InpLineColor = clrBlack;
 input int   InpPointSize = 1;
 input int   InpLineWidth = 1;
 
 input group "Fibonacci (garis pivot ke-2, ke-3 & aktif)"
-input color InpFiboColor = clrGold;
+input color InpFiboColor = clrBlack;
 input int   InpFiboWidth = 1;
 
 #define PREFIX "3P_"
@@ -122,6 +122,8 @@ void EnsureLine(const string name, const PivotPoint &from, const PivotPoint &to)
       ObjectMove(0, name, 0, from.time, from.price);
       ObjectMove(0, name, 1, to.time, to.price);
    }
+
+   ObjectSetInteger(0, name, OBJPROP_COLOR, InpLineColor);
 }
 
 void EnsureLine(const int index, const PivotPoint &from, const PivotPoint &to)
@@ -134,7 +136,6 @@ void EnsureFiboOnLine(const string name, const PivotPoint &from, const PivotPoin
    if(ObjectFind(0, name) < 0)
    {
       ObjectCreate(0, name, OBJ_FIBO, 0, from.time, from.price, to.time, to.price);
-      ObjectSetInteger(0, name, OBJPROP_COLOR, InpFiboColor);
       ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DOT);
       ObjectSetInteger(0, name, OBJPROP_WIDTH, InpFiboWidth);
       ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
@@ -145,13 +146,11 @@ void EnsureFiboOnLine(const string name, const PivotPoint &from, const PivotPoin
       ObjectSetInteger(0, name, OBJPROP_LEVELS, 2);
 
       ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 0, 0.382);
-      ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 0, InpFiboColor);
       ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 0, STYLE_DOT);
       ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 0, InpFiboWidth);
       ObjectSetString(0, name, OBJPROP_LEVELTEXT, 0, "38.2");
 
       ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 1, 0.618);
-      ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 1, InpFiboColor);
       ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 1, STYLE_DOT);
       ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 1, InpFiboWidth);
       ObjectSetString(0, name, OBJPROP_LEVELTEXT, 1, "61.8");
@@ -161,6 +160,10 @@ void EnsureFiboOnLine(const string name, const PivotPoint &from, const PivotPoin
       ObjectMove(0, name, 0, from.time, from.price);
       ObjectMove(0, name, 1, to.time, to.price);
    }
+
+   ObjectSetInteger(0, name, OBJPROP_COLOR, InpFiboColor);
+   ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 0, InpFiboColor);
+   ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 1, InpFiboColor);
 }
 
 void EnsureFiboOnLine(const int lineNo, const PivotPoint &from, const PivotPoint &to)
@@ -269,13 +272,77 @@ void StartOppositeExtreme(const int pivotIdx,
    hasExtreme = true;
 }
 
+// Cari swing terdekat ke lastClosed (pivot terkonfirmasi + ekstrem aktif)
+bool FindNearestSwing(const PivotPoint &pivots[], const int count,
+                      const PivotPoint &active, const bool hasActive,
+                      const datetime lastClosedTime,
+                      PivotPoint &nearest)
+{
+   bool found = false;
+   datetime bestTime = 0;
+
+   for(int i = 0; i < count; i++)
+   {
+      if(pivots[i].time <= lastClosedTime && pivots[i].time >= bestTime)
+      {
+         nearest = pivots[i];
+         bestTime = pivots[i].time;
+         found = true;
+      }
+   }
+
+   if(hasActive && active.time <= lastClosedTime && active.time >= bestTime)
+   {
+      nearest = active;
+      found = true;
+   }
+
+   return found;
+}
+
+// Swing lawan terakhir sebelum swing terdekat
+bool FindOppositeSwing(const PivotPoint &pivots[], const int count,
+                       const PivotPoint &active, const bool hasActive,
+                       const PivotPoint &nearest,
+                       PivotPoint &opposite)
+{
+   bool found = false;
+   datetime bestTime = 0;
+
+   for(int i = 0; i < count; i++)
+   {
+      if(pivots[i].isHigh == nearest.isHigh)
+         continue;
+      if(pivots[i].time >= nearest.time)
+         continue;
+      if(pivots[i].time >= bestTime)
+      {
+         opposite = pivots[i];
+         bestTime = pivots[i].time;
+         found = true;
+      }
+   }
+
+   // Aktif hanya bisa jadi opposite jika tipenya lawan & sebelum nearest
+   if(hasActive && active.isHigh != nearest.isHigh && active.time < nearest.time)
+   {
+      if(!found || active.time >= bestTime)
+      {
+         opposite = active;
+         found = true;
+      }
+   }
+
+   return found;
+}
+
 // Pivot LOW:
 // 1. Lacak candle terendah (extreme)
 // 2. a = pertama close > high titik low
 // 3. b = setelah a (+1,+2,...), wajib close > close a
 // 4. Jika a ada, b belum valid, muncul low baru → hapus a, ganti extreme, ulang langkah 2
-// 5. Garis ke high/low lastClosed jika close-nya break candle a atau candle b
-// Pivot HIGH: sebaliknya.
+// 5. Garis lastClosed: hanya jika swing terdekat = low lalu break swing high
+//    (atau swing terdekat = high lalu break swing low)
 void BuildPivots(const int rates_total,
                  const datetime &time[],
                  const double &high[],
@@ -314,7 +381,6 @@ void BuildPivots(const int rates_total,
 
       if(lookingForHigh)
       {
-         // 1 & 4 (mirror): lacak tertinggi; high baru sebelum b → hapus a
          if(high[i] > high[extreme])
          {
             extreme = i;
@@ -325,7 +391,6 @@ void BuildPivots(const int rates_total,
          if(i <= extreme)
             continue;
 
-         // 2: a = pertama close < low extreme
          if(pendingA < 0)
          {
             if(BodyBreakDown(close[i], low[extreme]))
@@ -336,7 +401,6 @@ void BuildPivots(const int rates_total,
          if(i <= pendingA)
             continue;
 
-         // 3: b = setelah a, close < close a
          if(BodyBreakDown(close[i], close[pendingA]))
          {
             int pivotIdx = extreme;
@@ -346,7 +410,6 @@ void BuildPivots(const int rates_total,
       }
       else
       {
-         // 1 & 4: lacak terendah; low baru sebelum b valid → hapus a, ulang langkah 2
          if(low[i] < low[extreme])
          {
             extreme = i;
@@ -357,7 +420,6 @@ void BuildPivots(const int rates_total,
          if(i <= extreme)
             continue;
 
-         // 2: a = pertama close > high titik low
          if(pendingA < 0)
          {
             if(BodyBreakUp(close[i], high[extreme]))
@@ -368,7 +430,6 @@ void BuildPivots(const int rates_total,
          if(i <= pendingA)
             continue;
 
-         // 3: b = setelah a, close > close a
          if(BodyBreakUp(close[i], close[pendingA]))
          {
             int pivotIdx = extreme;
@@ -388,43 +449,37 @@ void BuildPivots(const int rates_total,
          hasActive = true;
    }
 
-   // 5: jika lastClosed break a atau b → garis dari ekstrem ke high/low lastClosed
-   if(hasExtreme && pendingA >= 0 && lastClosed > pendingA)
-   {
-      bool brokeA = false;
-      bool brokeB = false;
+   // 5: garis lastClosed hanya setelah break swing lawan dari swing terdekat
+   PivotPoint nearest, opposite;
+   if(!FindNearestSwing(pivots, count, active, hasActive, time[lastClosed], nearest))
+      return;
+   if(!FindOppositeSwing(pivots, count, active, hasActive, nearest, opposite))
+      return;
+   if(time[lastClosed] <= nearest.time)
+      return;
 
-      if(lookingForHigh)
+   if(!nearest.isHigh)
+   {
+      // Swing terdekat = LOW → baru tampil jika break swing HIGH
+      if(opposite.isHigh && BodyBreakUp(close[lastClosed], opposite.price))
       {
-         // break a: close < low a  |  break b-level: close < close a
-         brokeA = BodyBreakDown(close[lastClosed], low[pendingA]);
-         brokeB = BodyBreakDown(close[lastClosed], close[pendingA]);
-         if(brokeA || brokeB)
-         {
-            breakFrom.time   = time[extreme];
-            breakFrom.price  = high[extreme];
-            breakFrom.isHigh = true;
-            breakTo.time     = time[lastClosed];
-            breakTo.price    = low[lastClosed];
-            breakTo.isHigh   = false;
-            hasBreak = (breakTo.time > breakFrom.time);
-         }
+         breakFrom = nearest;
+         breakTo.time   = time[lastClosed];
+         breakTo.price  = high[lastClosed];
+         breakTo.isHigh = true;
+         hasBreak = true;
       }
-      else
+   }
+   else
+   {
+      // Swing terdekat = HIGH → baru tampil jika break swing LOW
+      if(!opposite.isHigh && BodyBreakDown(close[lastClosed], opposite.price))
       {
-         // break a: close > high a  |  break b-level: close > close a
-         brokeA = BodyBreakUp(close[lastClosed], high[pendingA]);
-         brokeB = BodyBreakUp(close[lastClosed], close[pendingA]);
-         if(brokeA || brokeB)
-         {
-            breakFrom.time   = time[extreme];
-            breakFrom.price  = low[extreme];
-            breakFrom.isHigh = false;
-            breakTo.time     = time[lastClosed];
-            breakTo.price    = high[lastClosed];
-            breakTo.isHigh   = true;
-            hasBreak = (breakTo.time > breakFrom.time);
-         }
+         breakFrom = nearest;
+         breakTo.time   = time[lastClosed];
+         breakTo.price  = low[lastClosed];
+         breakTo.isHigh = false;
+         hasBreak = true;
       }
    }
 }
