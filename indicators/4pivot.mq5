@@ -1,4 +1,4 @@
-#property copyright "3 Pivot"
+#property copyright "4 Pivot"
 #property version   "1.90"
 #property indicator_chart_window
 #property indicator_plots 0
@@ -14,7 +14,7 @@ input group "Fibonacci (garis pivot ke-2, ke-3 & aktif)"
 input color InpFiboColor = clrGold;
 input int   InpFiboWidth = 1;
 
-#define PREFIX "3P_"
+#define PREFIX "4P_"
 #define MAX_PIVOTS 4
 
 struct PivotPoint
