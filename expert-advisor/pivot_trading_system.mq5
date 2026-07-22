@@ -44,6 +44,7 @@ string PREF;
 string ZONE_PREF;
 
 bool IsDashboardVisible = true;
+bool IsQuoteVisible = true;
 bool IsSDScanning = false;
 int UI_Y = 100;      
 int HEADER_Y = 50;   
@@ -74,6 +75,8 @@ void CreateEdit(string name, int x, int y, int w, int h, string val);
 void DelPO(ENUM_ORDER_TYPE type);
 void CloseAllPositions();
 void CloseAllOrders();
+void ApplyQuoteVisibility();
+void DrawNativeLabel(string name, string text, int x, int y, color clr);
 
 //+------------------------------------------------------------------+
 //| Initialization                                                   |
@@ -140,9 +143,19 @@ void OnTick() {
    // CADANGAN: Jika OnTimer macet, jam akan tetap terupdate setiap kali ada tick harga baru
    datetime serverTime = TimeCurrent();
    string liveClock = TimeToString(serverTime, TIME_MINUTES | TIME_SECONDS);
-   DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, 20, 25, clrBlack);
+   DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
+   DrawNativeLabel(PREF + "Quote", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 75, clrBlack);
+   DrawNativeLabel(PREF + "Quote2", "Jam Trading: 05-08 WIB, 16-19 WIB", (PANEL_W + 20), 100, clrBlack);
+   ApplyQuoteVisibility();
    
    CheckCutLoss(); 
+
+   static datetime lastBarTime = 0;
+   datetime curBarTime = iTime(_Symbol, _Period, 0);
+   if(curBarTime != lastBarTime) {
+      lastBarTime = curBarTime;
+      ScanSD();
+   }
 }
 
 // --- FUNGSI TIMER UNTUK MENYETEL WARNA MULTI EMA DARI EA ---
@@ -199,12 +212,25 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ObjectSetString(0, PREF+"Hide", OBJPROP_TEXT, IsDashboardVisible ? "Hide" : "Show");
          for(int i=0; i<ObjectsTotal(0); i++) { 
             string name = ObjectName(0, i); 
-            if(StringFind(name, PREF) == 0 && name != PREF+"Hide") { 
+            if(StringFind(name, PREF) == 0 &&
+               name != PREF+"Hide" &&
+               name != PREF+"HideQuote" &&
+               name != PREF+"Live_Clock" &&
+               name != PREF+"Quote" &&
+               name != PREF+"Quote2") { 
                ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? GetInitialY(name) : UI_OFFSCREEN); 
             } 
          }
          ObjectSetInteger(0, PREF+"Hide", OBJPROP_YDISTANCE, HEADER_Y + 7); 
+         ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_YDISTANCE, HEADER_Y + 7);
          ObjectSetInteger(0, PREF+"Hide", OBJPROP_STATE, false);
+         ChartRedraw();
+      }
+      else if(sparam == PREF+"HideQuote") {
+         IsQuoteVisible = !IsQuoteVisible;
+         ObjectSetString(0, PREF+"HideQuote", OBJPROP_TEXT, IsQuoteVisible ? "Hide Q" : "Show Q");
+         ApplyQuoteVisibility();
+         ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_STATE, false);
          ChartRedraw();
       }
       else if(sparam == PREF+"BtnDraw") { CreateDrawingLines(); CalculateAndDrawAll(); ObjectSetInteger(0, PREF+"BtnDraw", OBJPROP_STATE, false); }
@@ -390,6 +416,16 @@ void GetHighImpactUSDNews()
          }
       }
    }
+}
+
+// --- SHOW / HIDE QUOTE LABELS ---
+void ApplyQuoteVisibility()
+{
+   int yQuote  = IsQuoteVisible ? 75  : UI_OFFSCREEN;
+   int yQuote2 = IsQuoteVisible ? 100 : UI_OFFSCREEN;
+
+   if(ObjectFind(0, PREF + "Quote")  >= 0) ObjectSetInteger(0, PREF + "Quote",  OBJPROP_YDISTANCE, yQuote);
+   if(ObjectFind(0, PREF + "Quote2") >= 0) ObjectSetInteger(0, PREF + "Quote2", OBJPROP_YDISTANCE, yQuote2);
 }
 
 // --- HELPER MAKER OBJEK DASHBOARD NATIVE (ANTI-TEKS KEPOTONG) ---
@@ -703,9 +739,10 @@ void CreateDashboard() {
    ObjectSetInteger(0, PREF+"HdrPanel", OBJPROP_BGCOLOR, clrDarkSlateGray);
    ObjectSetInteger(0, PREF+"HdrPanel", OBJPROP_BORDER_TYPE, BORDER_SUNKEN);
    
-   CreateButton("Hide", 15, HEADER_Y + 7, 75, 25, "Hide", clrGray, clrWhite);
+   CreateButton("Hide", 15, HEADER_Y + 7, 65, 25, "Hide", clrGray, clrWhite);
+   CreateButton("HideQuote", 85, HEADER_Y + 7, 90, 25, "Hide Q", clrGray, clrWhite);
    
-   int titleCenterX = (PANEL_W / 2) - 150; 
+   int titleCenterX = (PANEL_W / 2) + 20; 
    CreateLabel("Title", titleCenterX, HEADER_Y + 2, "Pivot in Control", clrWhite); 
    ObjectSetInteger(0, PREF+"Title", OBJPROP_FONTSIZE, 12);
    ObjectSetString(0, PREF+"Title", OBJPROP_FONT, "Arial Bold");
@@ -718,7 +755,7 @@ void CreateDashboard() {
    int editW = 120;
    
    CreateLabel("LblLayers", 20, UI_Y+12, "Layers:", clrOrange);
-   CreateEdit("InpLayers", 130, UI_Y+18, editW, 25, "4");
+   CreateEdit("InpLayers", 130, UI_Y+18, editW, 25, "1");
    
    CreateLabel("LblLot", sellColumnX, UI_Y+12, "Lot/Lyr:", clrOrange);
    CreateEdit("InpLot", sellColumnX + 110, UI_Y+18, editW, 25, "0.01");
@@ -868,6 +905,7 @@ void CloseAllOrders(ulong magic)
 
 int GetInitialY(string name) {
    if(StringFind(name, "HdrPanel") != -1) return HEADER_Y;
+   if(StringFind(name, "HideQuote") != -1 || name == PREF+"Hide") return HEADER_Y + 7;
    if(StringFind(name, "Title") != -1) return HEADER_Y + 2; 
    if(StringFind(name, "Panel") != -1) return UI_Y;
    if(StringFind(name, "LblLayers") != -1 || StringFind(name, "InpLayers") != -1 || StringFind(name, "LblLot") != -1 || StringFind(name, "InpLot") != -1) return UI_Y + 18;

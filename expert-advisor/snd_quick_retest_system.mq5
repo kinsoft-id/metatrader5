@@ -24,7 +24,7 @@ struct USDNewsData {
 USDNewsData listNews[3]; // Maksimal menampung 3 berita terdekat
 
 input group "--- RISK & TRANSMISSION ---"
-input ulong InpMagicNumber = 55555; // Magic Number (Harus beda tiap chart)
+input ulong InpMagicNumber = 33333; // Magic Number (Harus beda tiap chart)
 
 
 CTrade trade;
@@ -33,6 +33,7 @@ string PREF;
 string ZONE_PREF;
 
 bool IsDashboardVisible = true;
+bool IsQuoteVisible = true;
 bool IsSDScanning = false;
 int UI_Y = 100;      
 int HEADER_Y = 50;   
@@ -63,6 +64,8 @@ void CreateEdit(string name, int x, int y, int w, int h, string val);
 void DelPO(ENUM_ORDER_TYPE type);
 void CloseAllPositions();
 void CloseAllOrders();
+void ApplyQuoteVisibility();
+void DrawNativeLabel(string name, string text, int x, int y, color clr);
 
 //+------------------------------------------------------------------+
 //| Initialization                                                   |
@@ -106,7 +109,8 @@ void OnTick() {
    DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
    DrawNativeLabel(PREF + "Quote", "Price Attempts to Come Back!", (PANEL_W + 20), 75, clrBlack);
    DrawNativeLabel(PREF + "Quote2", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 100, clrBlack);
-   
+   DrawNativeLabel(PREF + "Quote3", "Jam Trading: 08-16 WIB, 20-22 WIB", (PANEL_W + 20), 125, clrBlack);
+   ApplyQuoteVisibility();
 
    static datetime lastBarTime = 0;
    datetime curBarTime = iTime(_Symbol, _Period, 0);
@@ -130,6 +134,7 @@ void OnTimer()
    DrawNativeLabel(PREF + "Quote", "Price Attempts to Come Back!", (PANEL_W + 20), 75, clrBlack);
    DrawNativeLabel(PREF + "Quote2", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 100, clrBlack);
    DrawNativeLabel(PREF + "Quote3", "Entry Counter Trend 1x entry RR 1:1 Maksimal 2x Pantulan", (PANEL_W + 20), 125, clrBlack);
+   ApplyQuoteVisibility();
    
    ChartRedraw();
 }
@@ -151,12 +156,26 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ObjectSetString(0, PREF+"Hide", OBJPROP_TEXT, IsDashboardVisible ? "Hide" : "Show");
          for(int i=0; i<ObjectsTotal(0); i++) { 
             string name = ObjectName(0, i); 
-            if(StringFind(name, PREF) == 0 && name != PREF+"Hide") { 
+            if(StringFind(name, PREF) == 0 &&
+               name != PREF+"Hide" &&
+               name != PREF+"HideQuote" &&
+               name != PREF+"Live_Clock" &&
+               name != PREF+"Quote" &&
+               name != PREF+"Quote2" &&
+               name != PREF+"Quote3") { 
                ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? GetInitialY(name) : UI_OFFSCREEN); 
             } 
          }
          ObjectSetInteger(0, PREF+"Hide", OBJPROP_YDISTANCE, HEADER_Y + 7); 
+         ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_YDISTANCE, HEADER_Y + 7);
          ObjectSetInteger(0, PREF+"Hide", OBJPROP_STATE, false);
+         ChartRedraw();
+      }
+      else if(sparam == PREF+"HideQuote") {
+         IsQuoteVisible = !IsQuoteVisible;
+         ObjectSetString(0, PREF+"HideQuote", OBJPROP_TEXT, IsQuoteVisible ? "Hide Q" : "Show Q");
+         ApplyQuoteVisibility();
+         ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_STATE, false);
          ChartRedraw();
       }
       else if(sparam == PREF+"BtnDraw") { CreateDrawingLines(); CalculateAndDrawAll(); ObjectSetInteger(0, PREF+"BtnDraw", OBJPROP_STATE, false); }
@@ -297,6 +316,18 @@ void GetHighImpactUSDNews()
       // Cetak berurutan ke bawah (kelipatan 18 pixel dari koordinat Y=200)
       DrawNativeLabel(labelName, newsText, 20, 740 + (i * 18), clrRed);
    }
+}
+
+// --- SHOW / HIDE QUOTE LABELS ---
+void ApplyQuoteVisibility()
+{
+   int yQuote  = IsQuoteVisible ? 75  : UI_OFFSCREEN;
+   int yQuote2 = IsQuoteVisible ? 100 : UI_OFFSCREEN;
+   int yQuote3 = IsQuoteVisible ? 125 : UI_OFFSCREEN;
+
+   if(ObjectFind(0, PREF + "Quote")  >= 0) ObjectSetInteger(0, PREF + "Quote",  OBJPROP_YDISTANCE, yQuote);
+   if(ObjectFind(0, PREF + "Quote2") >= 0) ObjectSetInteger(0, PREF + "Quote2", OBJPROP_YDISTANCE, yQuote2);
+   if(ObjectFind(0, PREF + "Quote3") >= 0) ObjectSetInteger(0, PREF + "Quote3", OBJPROP_YDISTANCE, yQuote3);
 }
 
 // --- HELPER MAKER OBJEK DASHBOARD NATIVE (ANTI-TEKS KEPOTONG) ---
@@ -622,8 +653,9 @@ void CalculateAndDrawAll() {
 void CreateDashboard() {
    CreateObject("HdrPanel", OBJ_RECTANGLE_LABEL, 0, 10, HEADER_Y, PANEL_W, 40, clrBlack);
    ObjectSetInteger(0, PREF+"HdrPanel", OBJPROP_BGCOLOR, clrDarkSlateGray);
-   CreateButton("Hide", 15, HEADER_Y + 7, 50, 25, "Hide", clrGray, clrWhite);
-   CreateLabel("Title", (PANEL_W / 2) - 80, HEADER_Y + 2, "SND Quick Retest", clrWhite);
+   CreateButton("Hide", 15, HEADER_Y + 7, 65, 25, "Hide", clrGray, clrWhite);
+   CreateButton("HideQuote", 85, HEADER_Y + 7, 90, 25, "Hide Q", clrGray, clrWhite);
+   CreateLabel("Title", (PANEL_W / 2) + 20, HEADER_Y + 2, "SND Quick Retest", clrWhite);
    CreateObject("Panel", OBJ_RECTANGLE_LABEL, 0, 10, UI_Y, PANEL_W, PANEL_H, clrDarkSlateGray);
    
    CreateLabel("LblLayers", 20, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "3");
@@ -691,6 +723,7 @@ void CloseAllOrders() { for(int i=OrdersTotal()-1; i>=0; i--) { ulong t=OrderGet
 int GetInitialY(string name) {
    if(name == PREF+"HdrPanel") return HEADER_Y;
    if(name == PREF+"Hide") return HEADER_Y + 7;
+   if(name == PREF+"HideQuote") return HEADER_Y + 7;
    if(name == PREF+"Title") return HEADER_Y + 2;
    if(name == PREF+"Panel") return UI_Y;
    if(name == PREF+"LblLayers" || name == PREF+"InpLayers" || name == PREF+"LblLot" || name == PREF+"InpLot") return UI_Y + 12;
