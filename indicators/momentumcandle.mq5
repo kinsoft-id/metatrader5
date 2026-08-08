@@ -27,12 +27,12 @@ input double InpBodyPercent   = 70.0;   // Minimal body vs range (%)
 input int    InpBreakCandles  = 2;      // Minimal break candle sebelumnya
 input int    InpMaxCandles    = 10;     // Maksimal momentum candle ditampilkan
 input int    InpAtrPeriod     = 14;     // Period ATR filter ukuran
-input double InpMinAtrMult    = 1.0;    // Minimal range = ATR x multiplier
-input int    InpArrowOffset   = 10;     // Offset segitiga (points)
+input double InpMinAtrMult    = 0.6;    // Minimal range = ATR x multiplier
+input int    InpArrowOffset   = 20;     // Offset segitiga (points)
 
 input group "Fibonacci"
-input double InpFiboLevel1    = 61.8;   // Level Fibo 1
-input double InpFiboLevel2    = 38.2;   // Level Fibo 2
+input double InpFiboLevel1    = 74.5;   // Level Fibo 1
+input double InpFiboLevel2    = 23.6;   // Level Fibo 2
 input double InpFiboTarget    = 27.0;   // Target fibo negatif (-%) di luar candle
 input color  InpFiboColor     = clrDodgerBlue;
 input int    InpFiboWidth     = 1;
@@ -51,6 +51,8 @@ int OnInit()
 {
    SetIndexBuffer(0, bullBuffer, INDICATOR_DATA);
    SetIndexBuffer(1, bearBuffer, INDICATOR_DATA);
+   ArraySetAsSeries(bullBuffer, true);
+   ArraySetAsSeries(bearBuffer, true);
 
    PlotIndexSetInteger(0, PLOT_ARROW, 241);
    PlotIndexSetInteger(1, PLOT_ARROW, 242);
@@ -83,7 +85,6 @@ bool IsMomentumBody(const double open, const double high, const double low, cons
    if(range <= 0.0 || atr <= 0.0)
       return false;
 
-   // Filter candle kecil/persegi: range harus cukup besar vs ATR
    if(range < atr * InpMinAtrMult)
       return false;
 
@@ -92,23 +93,26 @@ bool IsMomentumBody(const double open, const double high, const double low, cons
 }
 
 //+------------------------------------------------------------------+
-bool BreaksPrevious(const int i, const bool bullish,
+// Index series: 0=current, 1=last closed, candle sebelumnya = i+1, i+2, ...
+bool BreaksPrevious(const int i, const int rates_total, const bool bullish,
                     const double &high[], const double &low[], const double &close[])
 {
-   if(InpBreakCandles < 1 || i < InpBreakCandles)
+   if(InpBreakCandles < 1)
+      return false;
+   if(i + InpBreakCandles >= rates_total)
       return false;
 
    if(bullish)
    {
-      double maxHigh = high[i - 1];
+      double maxHigh = high[i + 1];
       for(int j = 2; j <= InpBreakCandles; j++)
-         maxHigh = MathMax(maxHigh, high[i - j]);
+         maxHigh = MathMax(maxHigh, high[i + j]);
       return (close[i] > maxHigh);
    }
 
-   double minLow = low[i - 1];
+   double minLow = low[i + 1];
    for(int j = 2; j <= InpBreakCandles; j++)
-      minLow = MathMin(minLow, low[i - j]);
+      minLow = MathMin(minLow, low[i + j]);
    return (close[i] < minLow);
 }
 
@@ -151,8 +155,7 @@ void CreateFibo(const string name,
 }
 
 //+------------------------------------------------------------------+
-// return: 1 bullish, -1 bearish, 0 none
-int DetectSignal(const int i,
+int DetectSignal(const int i, const int rates_total,
                  const double &open[], const double &high[],
                  const double &low[], const double &close[],
                  const double atr)
@@ -160,14 +163,14 @@ int DetectSignal(const int i,
    if(!IsMomentumBody(open[i], high[i], low[i], close[i], atr))
       return 0;
 
-   if(close[i] > open[i] && BreaksPrevious(i, true, high, low, close))
+   if(close[i] > open[i] && BreaksPrevious(i, rates_total, true, high, low, close))
    {
       if(InpShowSide == MOM_SHOW_BEARISH)
          return 0;
       return 1;
    }
 
-   if(close[i] < open[i] && BreaksPrevious(i, false, high, low, close))
+   if(close[i] < open[i] && BreaksPrevious(i, rates_total, false, high, low, close))
    {
       if(InpShowSide == MOM_SHOW_BULLISH)
          return 0;
@@ -178,49 +181,51 @@ int DetectSignal(const int i,
 }
 
 //+------------------------------------------------------------------+
+void ClearBar(const int i, const datetime &time[])
+{
+   bullBuffer[i] = EMPTY_VALUE;
+   bearBuffer[i] = EMPTY_VALUE;
+   ObjectDelete(0, PREFIX + "FB_" + (string)time[i]);
+}
+
+//+------------------------------------------------------------------+
 void ApplySignal(const int i, const int signal, const double offset,
-                 const int rates_total,
                  const datetime &time[],
                  const double &high[], const double &low[])
 {
+   ClearBar(i, time);
+   if(signal == 0)
+      return;
+
    string fiboName = PREFIX + "FB_" + (string)time[i];
-   datetime t2 = (i < rates_total - 1) ? time[i + 1] : time[i] + PeriodSeconds();
+   // series: bar lebih baru ada di index lebih kecil
+   datetime t2 = (i > 0) ? time[i - 1] : time[i] + PeriodSeconds();
 
    if(signal > 0)
    {
       bullBuffer[i] = low[i] - offset;
-      bearBuffer[i] = EMPTY_VALUE;
       CreateFibo(fiboName, time[i], low[i], t2, high[i]);
-   }
-   else if(signal < 0)
-   {
-      bullBuffer[i] = EMPTY_VALUE;
-      bearBuffer[i] = high[i] + offset;
-      CreateFibo(fiboName, time[i], high[i], t2, low[i]);
    }
    else
    {
-      bullBuffer[i] = EMPTY_VALUE;
-      bearBuffer[i] = EMPTY_VALUE;
+      bearBuffer[i] = high[i] + offset;
+      CreateFibo(fiboName, time[i], high[i], t2, low[i]);
    }
 }
 
 //+------------------------------------------------------------------+
-void PruneOlderSignals(const int lastClosed, const int maxShow, const datetime &time[])
+void PruneOlderSignals(const int rates_total, const int maxShow, const datetime &time[])
 {
    int kept = 0;
-   for(int i = lastClosed; i >= InpBreakCandles; i--)
+   int maxI = rates_total - 1;
+   for(int i = 1; i <= maxI; i++)
    {
       if(bullBuffer[i] == EMPTY_VALUE && bearBuffer[i] == EMPTY_VALUE)
          continue;
 
       kept++;
       if(kept > maxShow)
-      {
-         bullBuffer[i] = EMPTY_VALUE;
-         bearBuffer[i] = EMPTY_VALUE;
-         ObjectDelete(0, PREFIX + "FB_" + (string)time[i]);
-      }
+         ClearBar(i, time);
    }
 }
 
@@ -239,22 +244,30 @@ int OnCalculate(const int rates_total,
    if(rates_total < InpBreakCandles + InpAtrPeriod + 2)
       return(0);
 
+   // Samakan indexing: 0 = current bar (series)
+   ArraySetAsSeries(time, true);
+   ArraySetAsSeries(open, true);
+   ArraySetAsSeries(high, true);
+   ArraySetAsSeries(low, true);
+   ArraySetAsSeries(close, true);
+   ArraySetAsSeries(bullBuffer, true);
+   ArraySetAsSeries(bearBuffer, true);
    ArraySetAsSeries(atrBuf, true);
+
    if(CopyBuffer(atrHandle, 0, 0, rates_total, atrBuf) < rates_total)
       return(0);
 
-   int lastClosed = rates_total - 2;
    int maxShow = MathMax(1, InpMaxCandles);
    double offset = InpArrowOffset * _Point;
-   int minBar = MathMax(InpBreakCandles, InpAtrPeriod);
+   int minShift = MathMax(InpBreakCandles, InpAtrPeriod);
 
    // Tick pada candle berjalan: tidak perlu kerja ulang
-   if(prev_calculated > 0 && time[lastClosed] == g_lastClosedTime)
+   if(prev_calculated > 0 && time[1] == g_lastClosedTime)
       return(rates_total);
 
-   g_lastClosedTime = time[lastClosed];
+   g_lastClosedTime = time[1];
 
-   // Full load: scan dari terbaru, stop setelah maxShow sinyal
+   // Full load: scan dari terbaru (shift 1), stop setelah maxShow sinyal
    if(prev_calculated == 0)
    {
       ArrayInitialize(bullBuffer, EMPTY_VALUE);
@@ -262,39 +275,27 @@ int OnCalculate(const int rates_total,
       ObjectsDeleteAll(0, PREFIX);
 
       int found = 0;
-      for(int i = lastClosed; i >= minBar && found < maxShow; i--)
+      for(int i = 1; i < rates_total - minShift && found < maxShow; i++)
       {
-         double atr = atrBuf[rates_total - 1 - i];
-         int signal = DetectSignal(i, open, high, low, close, atr);
+         // ATR bar sebelumnya = atrBuf[i+1]
+         double atr = atrBuf[i + 1];
+         int signal = DetectSignal(i, rates_total, open, high, low, close, atr);
          if(signal == 0)
             continue;
 
-         ApplySignal(i, signal, offset, rates_total, time, high, low);
+         ApplySignal(i, signal, offset, time, high, low);
          found++;
       }
       return(rates_total);
    }
 
-   // Bar baru close: evaluasi bar yang baru saja close saja
-   int start = MathMax(minBar, prev_calculated - 1);
-   if(start > lastClosed)
-      start = lastClosed;
+   // Bar baru close: evaluasi last closed (index 1)
+   double atr = atrBuf[2];
+   int signal = DetectSignal(1, rates_total, open, high, low, close, atr);
+   ApplySignal(1, signal, offset, time, high, low);
 
-   bool added = false;
-   for(int i = start; i <= lastClosed; i++)
-   {
-      // bersihkan objek lama di bar ini (jika ada) sebelum evaluasi ulang
-      ObjectDelete(0, PREFIX + "FB_" + (string)time[i]);
-
-      double atr = atrBuf[rates_total - 1 - i];
-      int signal = DetectSignal(i, open, high, low, close, atr);
-      ApplySignal(i, signal, offset, rates_total, time, high, low);
-      if(signal != 0)
-         added = true;
-   }
-
-   if(added)
-      PruneOlderSignals(lastClosed, maxShow, time);
+   if(signal != 0)
+      PruneOlderSignals(rates_total, maxShow, time);
 
    return(rates_total);
 }
