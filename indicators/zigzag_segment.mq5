@@ -17,14 +17,21 @@ input group "Fibonacci"
 input color InpFiboColor = clrBlack;
 input int   InpFiboWidth = 1;
 
+enum ENUM_H1_LINE_END
+{
+   H1_END_RAY_RIGHT = 0, // Sampai ke kanan
+   H1_END_H1_CLOSE  = 1  // Sampai close H1 (M1 terakhir)
+};
+
 input group "H1 Previous High/Low"
-input bool            InpShowH1HL    = true;          // Tampilkan previous high/low H1
-input int             InpH1MaxShow   = 1;             // Max show
-input color           InpH1BullColor = clrForestGreen;
-input color           InpH1BearColor = clrCrimson;
-input int             InpH1LineWidth = 1;
-input ENUM_LINE_STYLE InpH1LineStyle = STYLE_DASH;
-input int             InpH1FontSize  = 8;
+input bool             InpShowH1HL    = true;          // Tampilkan previous high/low H1
+input int              InpH1MaxShow   = 3;             // Max show
+input ENUM_H1_LINE_END InpH1LineEnd   = H1_END_H1_CLOSE; // Ujung garis
+input color            InpH1BullColor = clrForestGreen;
+input color            InpH1BearColor = clrCrimson;
+input int              InpH1LineWidth = 1;
+input ENUM_LINE_STYLE  InpH1LineStyle = STYLE_DASH;
+input int              InpH1FontSize  = 8;
 
 #define PREFIX "ZZSEG_"
 #define H1_TF  PERIOD_H1
@@ -281,17 +288,6 @@ void EnsureFibo(const string name, const PivotPoint &from, const PivotPoint &to)
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
       ObjectSetInteger(0, name, OBJPROP_BACK, true);
-      ObjectSetInteger(0, name, OBJPROP_LEVELS, 2);
-
-      ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 0, 0.382);
-      ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 0, STYLE_DOT);
-      ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 0, InpFiboWidth);
-      ObjectSetString(0, name, OBJPROP_LEVELTEXT, 0, "38.2");
-
-      ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 1, 0.618);
-      ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 1, STYLE_DOT);
-      ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 1, InpFiboWidth);
-      ObjectSetString(0, name, OBJPROP_LEVELTEXT, 1, "61.8");
    }
    else
    {
@@ -299,9 +295,27 @@ void EnsureFibo(const string name, const PivotPoint &from, const PivotPoint &to)
       ObjectMove(0, name, 1, to.time, to.price);
    }
 
+   ObjectSetInteger(0, name, OBJPROP_LEVELS, 3);
+
+   ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 0, 0.236);
+   ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 0, STYLE_DOT);
+   ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 0, InpFiboWidth);
+   ObjectSetString(0, name, OBJPROP_LEVELTEXT, 0, "23.6");
+
+   ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 1, 0.382);
+   ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 1, STYLE_DOT);
+   ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 1, InpFiboWidth);
+   ObjectSetString(0, name, OBJPROP_LEVELTEXT, 1, "38.2");
+
+   ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 2, 0.618);
+   ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 2, STYLE_DOT);
+   ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 2, InpFiboWidth);
+   ObjectSetString(0, name, OBJPROP_LEVELTEXT, 2, "61.8");
+
    ObjectSetInteger(0, name, OBJPROP_COLOR, InpFiboColor);
    ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 0, InpFiboColor);
    ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 1, InpFiboColor);
+   ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 2, InpFiboColor);
 }
 
 void EnsureBox(const string name, const PivotPoint &from, const PivotPoint &to)
@@ -401,10 +415,10 @@ bool StateChanged(const PivotPoint &pivots[], const int count,
 void EnsureHRay(const string name, const datetime t, const double price, const color col)
 {
    datetime t2 = t + PeriodSeconds(H1_TF);
+   bool rayRight = (InpH1LineEnd == H1_END_RAY_RIGHT);
    if(ObjectFind(0, name) < 0)
    {
       ObjectCreate(0, name, OBJ_TREND, 0, t, price, t2, price);
-      ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, true);
       ObjectSetInteger(0, name, OBJPROP_RAY_LEFT, false);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
@@ -415,6 +429,7 @@ void EnsureHRay(const string name, const datetime t, const double price, const c
       ObjectMove(0, name, 0, t, price);
       ObjectMove(0, name, 1, t2, price);
    }
+   ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, rayRight);
    ObjectSetInteger(0, name, OBJPROP_COLOR, col);
    ObjectSetInteger(0, name, OBJPROP_WIDTH, InpH1LineWidth);
    ObjectSetInteger(0, name, OBJPROP_STYLE, InpH1LineStyle);
