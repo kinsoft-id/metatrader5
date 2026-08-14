@@ -35,7 +35,7 @@ input double InpFiboLevel1    = 74.5;   // Level Fibo 1
 input double InpFiboLevel2    = 23.6;   // Level Fibo 2
 input double InpFiboTarget    = 27.0;   // Target fibo negatif (-%) di luar candle
 input color  InpFiboColor     = clrDodgerBlue;
-input int    InpFiboWidth     = 1;
+input int    InpFiboWidth     = 3;
 input bool   InpFiboRayRight  = false;  // Ray ke kanan
 
 #define PREFIX "MomCndl_"
@@ -139,19 +139,19 @@ void CreateFibo(const string name,
    ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 0, STYLE_DOT);
    ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 0, InpFiboWidth);
    ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 0, InpFiboColor);
-   ObjectSetString(0, name, OBJPROP_LEVELTEXT, 0, DoubleToString(InpFiboLevel1, 1));
+   ObjectSetString(0, name, OBJPROP_LEVELTEXT, 0, " ");
 
    ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 1, InpFiboLevel2 / 100.0);
    ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 1, STYLE_DOT);
    ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 1, InpFiboWidth);
    ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 1, InpFiboColor);
-   ObjectSetString(0, name, OBJPROP_LEVELTEXT, 1, DoubleToString(InpFiboLevel2, 1));
+   ObjectSetString(0, name, OBJPROP_LEVELTEXT, 1, " ");
 
    ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 2, -InpFiboTarget / 100.0);
    ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 2, STYLE_DOT);
    ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 2, InpFiboWidth);
    ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 2, InpFiboColor);
-   ObjectSetString(0, name, OBJPROP_LEVELTEXT, 2, DoubleToString(-InpFiboTarget, 1));
+   ObjectSetString(0, name, OBJPROP_LEVELTEXT, 2, " ");
 }
 
 //+------------------------------------------------------------------+

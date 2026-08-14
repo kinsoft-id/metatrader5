@@ -13,7 +13,7 @@ input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally
 input bool   InpShowDBD     = true;  // Tampilkan Drop Base Drop
 input bool   InpShowDBR     = false;  // Tampilkan Drop Base Rally
 input bool   InpShowRBD     = false;  // Tampilkan Rally Base Drop
-input int InpMaxZones = 5; // Maksimal zona yang ditampilkan
+input int InpMaxZones = 10; // Maksimal zona yang ditampilkan
 
 // Struktur untuk menyimpan data berita yang sudah disaring
 struct USDNewsData {
@@ -23,7 +23,15 @@ struct USDNewsData {
 
 USDNewsData listNews[3]; // Maksimal menampung 3 berita terdekat
 
+enum ENUM_LOT_MODE
+{
+   LOT_MANUAL    = 0, // Lot manual
+   LOT_AUTO_RISK = 1  // Auto lot dari risk %
+};
+
 input group "--- RISK & TRANSMISSION ---"
+input ENUM_LOT_MODE InpLotMode     = LOT_AUTO_RISK; // Mode lot
+input double        InpRiskPercent = 1.0;        // Risk % auto (default 1, max 1%)
 input ulong InpMagicNumber = 33333; // Magic Number (Harus beda tiap chart)
 
 
@@ -35,6 +43,9 @@ string ZONE_PREF;
 bool IsDashboardVisible = true;
 bool IsQuoteVisible = true;
 bool IsSDScanning = false;
+bool IsAutoLot = true;
+double g_lastManualLot = 0.01;
+double g_lastRiskPct = 1.0;
 int UI_Y = 100;      
 int HEADER_Y = 50;   
 int PANEL_W = 500;   
@@ -66,6 +77,14 @@ void CloseAllPositions();
 void CloseAllOrders();
 void ApplyQuoteVisibility();
 void DrawNativeLabel(string name, string text, int x, int y, color clr);
+void ApplyLotModeUI();
+void CreateCalcLotLabel();
+void UpdateLotRiskDisplay(double bEntry, double bSL, double sEntry, double sSL);
+double CalcRiskUSD(ENUM_ORDER_TYPE orderType, double entry, double sl, double lot, int layers);
+double NormalizeLot(double lot);
+double GetRiskBaseAmount();
+double CalcLotPerLayer(ENUM_ORDER_TYPE orderType, double entry, double sl, int layerCount, double riskPct);
+double GetResolvedLot(ENUM_ORDER_TYPE orderType, double entry, double sl);
 
 //+------------------------------------------------------------------+
 //| Initialization                                                   |
@@ -75,6 +94,9 @@ int OnInit()
    // Membuat nama objek unik, contoh hasil: "SND_55555_"
    PREF = "SNDQR_" + IntegerToString(InpMagicNumber) + "_";
    ZONE_PREF = "SNDQR_Z_" + IntegerToString(InpMagicNumber) + "_";
+
+   IsAutoLot = (InpLotMode == LOT_AUTO_RISK);
+   g_lastRiskPct = (InpRiskPercent > 0.0) ? InpRiskPercent : 1.0;
    
    // Mengatur agar setiap kali EA ini mengirim order, Magic Number langsung terpasang otomatis
    trade.SetExpertMagicNumber(InpMagicNumber);
@@ -178,6 +200,16 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_STATE, false);
          ChartRedraw();
       }
+      else if(sparam == PREF+"BtnLotMode") {
+         if(IsAutoLot) g_lastRiskPct = GetInputValue("InpLot");
+         else          g_lastManualLot = GetInputValue("InpLot");
+         IsAutoLot = !IsAutoLot;
+         ApplyLotModeUI();
+         if(ObjectFind(0, PREF+"Line_Floor") >= 0 && ObjectFind(0, PREF+"Line_Ceiling") >= 0)
+            CalculateAndDrawAll();
+         ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_STATE, false);
+         ChartRedraw();
+      }
       else if(sparam == PREF+"BtnDraw") { CreateDrawingLines(); CalculateAndDrawAll(); ObjectSetInteger(0, PREF+"BtnDraw", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BtnScanSD") { 
          IsSDScanning = !IsSDScanning;
@@ -198,6 +230,8 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ObjectsDeleteAll(0, PREF+"Line_"); ObjectsDeleteAll(0, PREF+"Calc_"); ObjectsDeleteAll(0, PREF+"Layer_"); ObjectsDeleteAll(0, ZONE_PREF); 
          IsSDScanning = false; 
          ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "Scan S&D"); ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrDarkGreen);
+         if(IsAutoLot && ObjectFind(0, PREF+"LblCalcLot") >= 0)
+            ObjectSetString(0, PREF+"LblCalcLot", OBJPROP_TEXT, "Lot/layer: (draw line)");
          ChartRedraw(); 
          ObjectSetInteger(0, PREF+"Reset", OBJPROP_STATE, false); 
       }
@@ -250,6 +284,16 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ObjectSetInteger(0, sparam, OBJPROP_SELECTABLE, false);
          ChartRedraw();
          ObjectSetInteger(0, sparam, OBJPROP_SELECTABLE, true);
+         ChartRedraw();
+      }
+   }
+
+   if(id == CHARTEVENT_OBJECT_ENDEDIT)
+   {
+      if(sparam == PREF+"InpLayers" || sparam == PREF+"InpLot")
+      {
+         if(ObjectFind(0, PREF+"Line_Floor") >= 0 && ObjectFind(0, PREF+"Line_Ceiling") >= 0)
+            CalculateAndDrawAll();
          ChartRedraw();
       }
    }
@@ -523,16 +567,176 @@ double SellTPByLayer(int layerIndex, double entry, double sl)
    return entry - 5.0 * risk;
 }
 
+double NormalizeLot(double lot)
+{
+   double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double stepLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   if(stepLot <= 0.0) stepLot = 0.01;
+
+   lot = MathFloor(lot / stepLot + 0.0000001) * stepLot;
+   if(lot < minLot) lot = minLot;
+   if(lot > maxLot) lot = maxLot;
+   return lot;
+}
+
+double GetRiskBaseAmount()
+{
+   return AccountInfoDouble(ACCOUNT_BALANCE);
+}
+
+double CalcLotPerLayer(ENUM_ORDER_TYPE orderType, double entry, double sl, int layerCount, double riskPct)
+{
+   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   if(layerCount <= 0 || entry <= 0.0 || sl <= 0.0 || MathAbs(entry - sl) <= 0.0)
+      return NormalizeLot(minLot);
+
+   double base = GetRiskBaseAmount();
+   if(base <= 0.0) return NormalizeLot(minLot);
+
+   double totalRiskMoney = base * riskPct / 100.0;
+   double riskPerLayer   = totalRiskMoney / (double)layerCount;
+
+   double profit = 0.0;
+   if(!OrderCalcProfit(orderType, _Symbol, 1.0, entry, sl, profit))
+   {
+      Print("OrderCalcProfit gagal. Error: ", GetLastError());
+      return NormalizeLot(minLot);
+   }
+
+   double lossPerLot = MathAbs(profit);
+   if(lossPerLot <= 0.0) return NormalizeLot(minLot);
+
+   return NormalizeLot(riskPerLayer / lossPerLot);
+}
+
+double GetResolvedLot(ENUM_ORDER_TYPE orderType, double entry, double sl)
+{
+   int layers = (int)GetInputValue("InpLayers");
+   if(layers < 1) layers = 1;
+
+   if(!IsAutoLot)
+   {
+      double lot = GetInputValue("InpLot");
+      if(lot <= 0.0) return 0.0;
+      return NormalizeLot(lot);
+   }
+
+   double riskPct = GetInputValue("InpLot");
+   if(riskPct <= 0.0) riskPct = (InpRiskPercent > 0.0) ? InpRiskPercent : 1.0;
+
+   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   // Risk di atas 1% → lot terkecil
+   if(riskPct > 1.0)
+   {
+      Print("Risk ", DoubleToString(riskPct, 2), "% > 1%. Memakai lot terkecil ", minLot);
+      return NormalizeLot(minLot);
+   }
+
+   return CalcLotPerLayer(orderType, entry, sl, layers, riskPct);
+}
+
+void ApplyLotModeUI()
+{
+   if(ObjectFind(0, PREF+"BtnLotMode") < 0) return;
+
+   if(IsAutoLot)
+   {
+      ObjectSetString(0, PREF+"BtnLotMode", OBJPROP_TEXT, "Risk %");
+      ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_BGCOLOR, clrDarkGreen);
+      double riskVal = (g_lastRiskPct > 0.0) ? g_lastRiskPct : 1.0;
+      ObjectSetString(0, PREF+"InpLot", OBJPROP_TEXT, DoubleToString(riskVal, 2));
+      if(ObjectFind(0, PREF+"Line_Floor") < 0 && ObjectFind(0, PREF+"LblCalcLot") >= 0)
+         ObjectSetString(0, PREF+"LblCalcLot", OBJPROP_TEXT, "Lot/layer: (draw line)");
+   }
+   else
+   {
+      ObjectSetString(0, PREF+"BtnLotMode", OBJPROP_TEXT, "Lot");
+      ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_BGCOLOR, clrDarkSlateGray);
+      double lotVal = (g_lastManualLot > 0.0) ? g_lastManualLot : 0.05;
+      ObjectSetString(0, PREF+"InpLot", OBJPROP_TEXT, DoubleToString(lotVal, 2));
+      if(ObjectFind(0, PREF+"LblCalcLot") >= 0)
+         ObjectSetString(0, PREF+"LblCalcLot", OBJPROP_TEXT, "");
+   }
+}
+
+void CreateCalcLotLabel()
+{
+   string name = PREF + "LblCalcLot";
+   if(ObjectFind(0, name) >= 0)
+      ObjectDelete(0, name);
+
+   ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 10 + PANEL_W / 2);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, UI_Y + 45);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 9);
+   ObjectSetString(0, name, OBJPROP_FONT, "Arial");
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clrOrange);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, 11);
+   ObjectSetString(0, name, OBJPROP_TEXT, IsAutoLot ? "Lot/layer: (draw line)" : "");
+}
+
+double CalcRiskUSD(ENUM_ORDER_TYPE orderType, double entry, double sl, double lot, int layers)
+{
+   if(lot <= 0.0 || layers < 1 || entry <= 0.0 || sl <= 0.0 || MathAbs(entry - sl) <= 0.0)
+      return 0.0;
+
+   double profit = 0.0;
+   if(OrderCalcProfit(orderType, _Symbol, 1.0, entry, sl, profit))
+      return MathAbs(profit) * lot * (double)layers;
+
+   double tickVal  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(tickSize <= 0.0 || tickVal <= 0.0) return 0.0;
+   return MathAbs(entry - sl) * lot * (double)layers * tickVal / tickSize;
+}
+
+void UpdateLotRiskDisplay(double bEntry, double bSL, double sEntry, double sSL)
+{
+   int layers = (int)GetInputValue("InpLayers");
+   if(layers < 1) layers = 1;
+
+   double buyLot  = GetResolvedLot(ORDER_TYPE_BUY, bEntry, bSL);
+   double sellLot = GetResolvedLot(ORDER_TYPE_SELL, sEntry, sSL);
+
+   double buyRiskUSD  = CalcRiskUSD(ORDER_TYPE_BUY, bEntry, bSL, buyLot, layers);
+   double sellRiskUSD = CalcRiskUSD(ORDER_TYPE_SELL, sEntry, sSL, sellLot, layers);
+
+   if(ObjectFind(0, PREF+"Buy_Risk") >= 0)
+      ObjectSetString(0, PREF+"Buy_Risk", OBJPROP_TEXT, DoubleToString(buyRiskUSD, 2));
+   if(ObjectFind(0, PREF+"Sell_Risk") >= 0)
+      ObjectSetString(0, PREF+"Sell_Risk", OBJPROP_TEXT, DoubleToString(sellRiskUSD, 2));
+
+   string name = PREF + "LblCalcLot";
+   if(ObjectFind(0, name) < 0)
+      CreateCalcLotLabel();
+
+   string calcText = "";
+   if(IsAutoLot)
+      calcText = "Lot/layer: B " + DoubleToString(buyLot, 2) + " / S " + DoubleToString(sellLot, 2);
+
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 10 + PANEL_W / 2);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? UI_Y + 45 : UI_OFFSCREEN);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clrOrange);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, 11);
+   ObjectSetString(0, name, OBJPROP_TEXT, calcText);
+}
+
 void PlaceBuyLimit() { 
    int layers = (int)GetInputValue("InpLayers"); 
    if(layers < 1) layers = 1;
-   double lot = GetInputValue("InpLot"); 
    double proximal = GetInputValue("Buy_Entry"); 
    double sl = GetInputValue("Buy_Stoploss"); 
    // Semua layer entry di harga yang sama; SL satu; TP dinamis per layer
    double entry = NormalizeDouble(proximal + GetSpreadPrice() * 2.0, _Digits);
+   double lot = GetResolvedLot(ORDER_TYPE_BUY, entry, sl);
 
    if(proximal == 0 || lot == 0) return; 
+   Print("Buy Limit: ", layers, " layer x ", DoubleToString(lot, 2), " lot", IsAutoLot ? " (auto risk)" : " (manual)");
    for(int i=0; i<layers; i++) { 
       double tp = BuyTPByLayer(i, entry, sl);
       trade.BuyLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Buy L"+IntegerToString(i+1)); 
@@ -542,13 +746,14 @@ void PlaceBuyLimit() {
 void PlaceSellLimit() { 
    int layers = (int)GetInputValue("InpLayers"); 
    if(layers < 1) layers = 1;
-   double lot = GetInputValue("InpLot"); 
    double proximal = GetInputValue("Sell_Entry"); 
    double sl = GetInputValue("Sell_Stoploss"); 
    // Semua layer entry di harga yang sama; SL satu; TP dinamis per layer
    double entry = NormalizeDouble(proximal - GetSpreadPrice() * 2.0, _Digits);
+   double lot = GetResolvedLot(ORDER_TYPE_SELL, entry, sl);
 
    if(proximal == 0 || lot == 0) return; 
+   Print("Sell Limit: ", layers, " layer x ", DoubleToString(lot, 2), " lot", IsAutoLot ? " (auto risk)" : " (manual)");
    for(int i=0; i<layers; i++) { 
       double tp = SellTPByLayer(i, entry, sl);
       trade.SellLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Sell L"+IntegerToString(i+1)); 
@@ -556,9 +761,9 @@ void PlaceSellLimit() {
 }
 
 void PlaceBuyNow() { 
-   double lot = GetInputValue("InpLot");
    double sl = GetInputValue("Buy_Stoploss");
    double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double lot = GetResolvedLot(ORDER_TYPE_BUY, entry, sl);
    double tp5 = BuyTPByLayer(4, entry, sl);
    
    if(lot <= 0) {
@@ -572,9 +777,9 @@ void PlaceBuyNow() {
 }
 
 void PlaceSellNow() { 
-   double lot = GetInputValue("InpLot");
    double sl = GetInputValue("Sell_Stoploss");
    double entry = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double lot = GetResolvedLot(ORDER_TYPE_SELL, entry, sl);
    double tp5 = SellTPByLayer(4, entry, sl);
    
    if(lot <= 0) {
@@ -642,12 +847,7 @@ void CalculateAndDrawAll() {
    UpdateInput("Buy_Area", buyPips);
    UpdateInput("Sell_Area", sellPips);
 
-   // Calculate risk in USD for Buy position (assuming balance-based 1 lot = 100,000 units)
-   double lot = GetInputValue("InpLot");
-   double buyRiskUSD = bRisk * lot * SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE) / SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   double sellRiskUSD = sRisk * lot * SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE) / SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   UpdateInput("Buy_Risk", buyRiskUSD);
-   UpdateInput("Sell_Risk", sellRiskUSD);
+   UpdateLotRiskDisplay(bEntry1, bSL, sEntry1, sSL);
 }
 
 void CreateDashboard() {
@@ -658,10 +858,11 @@ void CreateDashboard() {
    CreateLabel("Title", (PANEL_W / 2) + 20, HEADER_Y + 2, "SND Quick Retest", clrWhite);
    CreateObject("Panel", OBJ_RECTANGLE_LABEL, 0, 10, UI_Y, PANEL_W, PANEL_H, clrDarkSlateGray);
    
-   CreateLabel("LblLayers", 20, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "3");
-   CreateLabel("LblLot", 270, UI_Y+12, "Lot", clrOrange); CreateEdit("InpLot", 370, UI_Y+18, 100, 25, "0.01");
-
-//    CreateLabel("LblQuote", 70, UI_Y+45, "Price Attempts to Come Back!", clrBlack);
+   CreateLabel("LblLayers", 20, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "1");
+   CreateButton("BtnLotMode", 260, UI_Y+12, 100, 25, "Lot", clrDarkSlateGray, clrOrange);
+   CreateEdit("InpLot", 370, UI_Y+18, 100, 25, "1.00");
+   CreateCalcLotLabel();
+   ApplyLotModeUI();
    
    CreateButton("BtnDraw", 20, UI_Y+80, 180, 30, "Draw Line", clrPurple, clrWhite);
    CreateButton("BtnScanSD", 270, UI_Y+80, 180, 30, "Scan S&D", clrDarkGreen, clrWhite);
@@ -682,6 +883,7 @@ void CreateDashboard() {
    CreateButton("SellNow", 270, UI_Y + 560, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
    CreateButton("GetNews", 20, UI_Y + 600, 200, 30, "Get News", clrGray, clrBlack);
    CreateButton("Reset", 270, UI_Y + 600, 200, 30, "Reset", clrGray, clrBlack);
+   ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_ZORDER, 10);
 
    // Tambahkan ini di setiap fungsi pembuatan tombol/label dashboard Anda
    ObjectSetInteger(0, "BtnBuyL", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
@@ -726,7 +928,8 @@ int GetInitialY(string name) {
    if(name == PREF+"HideQuote") return HEADER_Y + 7;
    if(name == PREF+"Title") return HEADER_Y + 2;
    if(name == PREF+"Panel") return UI_Y;
-   if(name == PREF+"LblLayers" || name == PREF+"InpLayers" || name == PREF+"LblLot" || name == PREF+"InpLot") return UI_Y + 12;
+   if(name == PREF+"LblLayers" || name == PREF+"InpLayers" || name == PREF+"BtnLotMode" || name == PREF+"InpLot") return UI_Y + 12;
+   if(name == PREF+"LblCalcLot") return UI_Y + 45;
    if(name == PREF+"BtnDraw" || name == PREF+"BtnScanSD") return UI_Y + 80;
    
    string bL[]={"Floor","Entry","Stoploss","TP1","TP2","TP3","Area","Risk"};

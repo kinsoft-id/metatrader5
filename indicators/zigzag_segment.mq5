@@ -1,5 +1,5 @@
 #property copyright "ZigZag Segment"
-#property version   "1.00"
+#property version   "1.10"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -17,7 +17,17 @@ input group "Fibonacci"
 input color InpFiboColor = clrBlack;
 input int   InpFiboWidth = 1;
 
+input group "H1 Previous High/Low"
+input bool            InpShowH1HL    = true;          // Tampilkan previous high/low H1
+input int             InpH1MaxShow   = 1;             // Max show
+input color           InpH1BullColor = clrForestGreen;
+input color           InpH1BearColor = clrCrimson;
+input int             InpH1LineWidth = 1;
+input ENUM_LINE_STYLE InpH1LineStyle = STYLE_DASH;
+input int             InpH1FontSize  = 8;
+
 #define PREFIX "ZZSEG_"
+#define H1_TF  PERIOD_H1
 
 struct PivotPoint
 {
@@ -32,6 +42,8 @@ PivotPoint g_active;
 bool       g_hasActive = false;
 bool       g_hasActiveLine = false;
 datetime   g_lastBarTime = 0;
+datetime   g_lastH1BarTime = 0;
+int        g_h1Shown = 0;
 
 void OnDeinit(const int reason)
 {
@@ -41,6 +53,8 @@ void OnDeinit(const int reason)
    g_hasActive = false;
    g_hasActiveLine = false;
    g_lastBarTime = 0;
+   g_lastH1BarTime = 0;
+   g_h1Shown = 0;
 }
 
 bool BodyBreakUp(const double closePrice, const double level)   { return closePrice > level; }
@@ -384,6 +398,104 @@ bool StateChanged(const PivotPoint &pivots[], const int count,
    return false;
 }
 
+void EnsureHRay(const string name, const datetime t, const double price, const color col)
+{
+   datetime t2 = t + PeriodSeconds(H1_TF);
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_TREND, 0, t, price, t2, price);
+      ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, true);
+      ObjectSetInteger(0, name, OBJPROP_RAY_LEFT, false);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, name, OBJPROP_BACK, true);
+   }
+   else
+   {
+      ObjectMove(0, name, 0, t, price);
+      ObjectMove(0, name, 1, t2, price);
+   }
+   ObjectSetInteger(0, name, OBJPROP_COLOR, col);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, InpH1LineWidth);
+   ObjectSetInteger(0, name, OBJPROP_STYLE, InpH1LineStyle);
+}
+
+void EnsureHText(const string name, const datetime t, const double price,
+                 const string text, const color col, const ENUM_ANCHOR_POINT anchor)
+{
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_TEXT, 0, t, price);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpH1FontSize);
+      ObjectSetString(0, name, OBJPROP_FONT, "Arial");
+   }
+   else
+      ObjectMove(0, name, 0, t, price);
+
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, anchor);
+   ObjectSetString(0, name, OBJPROP_TEXT, " " + text);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, col);
+}
+
+void ClearH1Objects(const int keepCount)
+{
+   int lim = MathMax(g_h1Shown, keepCount);
+   for(int i = keepCount; i < lim; i++)
+   {
+      string idx = IntegerToString(i);
+      ObjectDelete(0, PREFIX + "H1H_" + idx);
+      ObjectDelete(0, PREFIX + "H1L_" + idx);
+      ObjectDelete(0, PREFIX + "H1HT_" + idx);
+      ObjectDelete(0, PREFIX + "H1LT_" + idx);
+   }
+   g_h1Shown = keepCount;
+}
+
+bool UpdateH1Levels()
+{
+   if(!InpShowH1HL)
+   {
+      ClearH1Objects(0);
+      return true;
+   }
+
+   int maxShow = MathMax(0, InpH1MaxShow);
+   if(maxShow <= 0)
+   {
+      ClearH1Objects(0);
+      return true;
+   }
+
+   MqlRates h1[];
+   ArraySetAsSeries(h1, true);
+   int copied = CopyRates(_Symbol, H1_TF, 1, maxShow, h1);
+   if(copied <= 0)
+      return false;
+
+   int shown = 0;
+   for(int i = 0; i < copied; i++)
+   {
+      bool isBull = (h1[i].close >= h1[i].open);
+      color col = isBull ? InpH1BullColor : InpH1BearColor;
+      string idx = IntegerToString(i);
+      datetime t = h1[i].time;
+
+      string highLabel = isBull ? "Bullish" : "Strong High";
+      string lowLabel  = isBull ? "Strong Low" : "Bearish";
+
+      EnsureHRay(PREFIX + "H1H_" + idx, t, h1[i].high, col);
+      EnsureHRay(PREFIX + "H1L_" + idx, t, h1[i].low, col);
+      EnsureHText(PREFIX + "H1HT_" + idx, t, h1[i].high, highLabel, col, ANCHOR_LEFT_LOWER);
+      EnsureHText(PREFIX + "H1LT_" + idx, t, h1[i].low, lowLabel, col, ANCHOR_LEFT_UPPER);
+      shown++;
+   }
+
+   ClearH1Objects(shown);
+   return true;
+}
+
 int OnCalculate(const int rates_total,
                 const int prev_calculated,
                 const datetime &time[],
@@ -399,7 +511,19 @@ int OnCalculate(const int rates_total,
       return 0;
 
    datetime curBar = time[rates_total - 1];
+   datetime h1Bar = iTime(_Symbol, H1_TF, 0);
    bool needCalc = (prev_calculated == 0 || curBar != g_lastBarTime || rates_total != prev_calculated);
+   bool needH1 = (prev_calculated == 0 || h1Bar == 0 || h1Bar != g_lastH1BarTime);
+
+   if(!needCalc && !needH1)
+      return rates_total;
+
+   if(needH1)
+   {
+      if(UpdateH1Levels() && h1Bar != 0)
+         g_lastH1BarTime = h1Bar;
+   }
+
    if(!needCalc)
       return rates_total;
 
