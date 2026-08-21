@@ -16,6 +16,12 @@ input bool  InpShowActive = true;         // Tampilkan segmen ekstrem aktif
 input group "Fibonacci"
 input color InpFiboColor = clrBlack;
 input int   InpFiboWidth = 1;
+input bool  InpFiboShowLabels = false; // Show label level
+input bool  InpFibo236   = true;   // Show 23.6
+input bool  InpFibo382   = true;   // Show 38.2
+input bool  InpFibo50    = true;   // Show 50.0
+input bool  InpFibo618   = true;   // Show 61.8
+input bool  InpFibo786   = true;   // Show 78.6
 
 enum ENUM_H1_LINE_END
 {
@@ -276,8 +282,35 @@ void EnsureLine(const string name, const PivotPoint &from, const PivotPoint &to)
    ObjectSetInteger(0, name, OBJPROP_COLOR, InpLineColor);
 }
 
+void ApplyFiboLevel(const string name, const int idx, const double value, const string text)
+{
+   ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, idx, value);
+   ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, idx, STYLE_DOT);
+   ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, idx, InpFiboWidth);
+   ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, idx, InpFiboColor);
+   ObjectSetString(0, name, OBJPROP_LEVELTEXT, idx, InpFiboShowLabels ? text : " ");
+}
+
+int FiboVisibleCount()
+{
+   int n = 0;
+   if(InpFibo236) n++;
+   if(InpFibo382) n++;
+   if(InpFibo50)  n++;
+   if(InpFibo618) n++;
+   if(InpFibo786) n++;
+   return n;
+}
+
 void EnsureFibo(const string name, const PivotPoint &from, const PivotPoint &to)
 {
+   int n = FiboVisibleCount();
+   if(n <= 0)
+   {
+      ObjectDelete(0, name);
+      return;
+   }
+
    if(ObjectFind(0, name) < 0)
    {
       ObjectCreate(0, name, OBJ_FIBO, 0, from.time, from.price, to.time, to.price);
@@ -295,27 +328,15 @@ void EnsureFibo(const string name, const PivotPoint &from, const PivotPoint &to)
       ObjectMove(0, name, 1, to.time, to.price);
    }
 
-   ObjectSetInteger(0, name, OBJPROP_LEVELS, 3);
-
-   ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 0, 0.236);
-   ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 0, STYLE_DOT);
-   ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 0, InpFiboWidth);
-   ObjectSetString(0, name, OBJPROP_LEVELTEXT, 0, "23.6");
-
-   ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 1, 0.382);
-   ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 1, STYLE_DOT);
-   ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 1, InpFiboWidth);
-   ObjectSetString(0, name, OBJPROP_LEVELTEXT, 1, "38.2");
-
-   ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 2, 0.618);
-   ObjectSetInteger(0, name, OBJPROP_LEVELSTYLE, 2, STYLE_DOT);
-   ObjectSetInteger(0, name, OBJPROP_LEVELWIDTH, 2, InpFiboWidth);
-   ObjectSetString(0, name, OBJPROP_LEVELTEXT, 2, "61.8");
-
    ObjectSetInteger(0, name, OBJPROP_COLOR, InpFiboColor);
-   ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 0, InpFiboColor);
-   ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 1, InpFiboColor);
-   ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, 2, InpFiboColor);
+   ObjectSetInteger(0, name, OBJPROP_LEVELS, n);
+
+   int idx = 0;
+   if(InpFibo236) ApplyFiboLevel(name, idx++, 0.236, "23.6");
+   if(InpFibo382) ApplyFiboLevel(name, idx++, 0.382, "38.2");
+   if(InpFibo50)  ApplyFiboLevel(name, idx++, 0.500, "50.0");
+   if(InpFibo618) ApplyFiboLevel(name, idx++, 0.618, "61.8");
+   if(InpFibo786) ApplyFiboLevel(name, idx++, 0.786, "78.6");
 }
 
 void EnsureBox(const string name, const PivotPoint &from, const PivotPoint &to)
