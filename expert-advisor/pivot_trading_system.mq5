@@ -144,10 +144,8 @@ void OnTick() {
    datetime serverTime = TimeCurrent();
    string liveClock = TimeToString(serverTime, TIME_MINUTES | TIME_SECONDS);
    DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
-   DrawNativeLabel(PREF + "Quote", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 75, clrBlack);
-   DrawNativeLabel(PREF + "Quote2", "Jam Trading: 05-08 WIB, 16-19 WIB", (PANEL_W + 20), 100, clrBlack);
    ApplyQuoteVisibility();
-   
+
    CheckCutLoss(); 
 
    static datetime lastBarTime = 0;
@@ -185,12 +183,7 @@ void OnTimer()
          ObjectSetInteger(0, shortName, OBJPROP_COLOR, clrEMA20);
    }
    
-   // 1. UPDATE JAM DIGITAL (Berjalan murni setiap 1 detik)
-   datetime serverTime = TimeCurrent(); // Gunakan TimeCurrent agar singkron dengan market, atau TimeLocal() untuk jam PC
-   string liveClock = TimeToString(serverTime, TIME_MINUTES | TIME_SECONDS);
-   
-   DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, 20, 25, clrBlack);
-   
+   ApplyQuoteVisibility();
    ChartRedraw();
 }
 
@@ -212,17 +205,22 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ObjectSetString(0, PREF+"Hide", OBJPROP_TEXT, IsDashboardVisible ? "Hide" : "Show");
          for(int i=0; i<ObjectsTotal(0); i++) { 
             string name = ObjectName(0, i); 
-            if(StringFind(name, PREF) == 0 &&
-               name != PREF+"Hide" &&
-               name != PREF+"HideQuote" &&
-               name != PREF+"Live_Clock" &&
-               name != PREF+"Quote" &&
-               name != PREF+"Quote2") { 
-               ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? GetInitialY(name) : UI_OFFSCREEN); 
-            } 
+            if(StringFind(name, PREF) != 0) continue;
+            if(StringFind(name, PREF+"Line_") == 0 ||
+               StringFind(name, PREF+"Calc_") == 0 ||
+               StringFind(name, PREF+"Layer_") == 0) continue;
+            if(name == PREF+"Hide" ||
+               name == PREF+"HideQuote" ||
+               name == PREF+"HdrPanel" ||
+               name == PREF+"Title" ||
+               name == PREF+"Live_Clock" ||
+               name == PREF+"Quote" ||
+               name == PREF+"Quote2") continue;
+            ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? GetInitialY(name) : UI_OFFSCREEN); 
          }
          ObjectSetInteger(0, PREF+"Hide", OBJPROP_YDISTANCE, HEADER_Y + 7); 
          ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_YDISTANCE, HEADER_Y + 7);
+         ApplyQuoteVisibility();
          ObjectSetInteger(0, PREF+"Hide", OBJPROP_STATE, false);
          ChartRedraw();
       }
@@ -344,15 +342,16 @@ void UpdateDashboard()
    string buyPipsText  = "Area Width: " + DoubleToString(buyPips, 1) + " Pips";
    string sellPipsText = "Area Width: " + DoubleToString(sellPips, 1) + " Pips";
    
-   // Gunakan fungsi native agar anti-error token
-   DrawNativeLabel(PREF + "Lbl_Buy_Area_Width", buyPipsText, 20, 140, clrDarkSlateGray); 
-   DrawNativeLabel(PREF + "Lbl_Sell_Area_Width", sellPipsText, 160, 140, clrDarkSlateGray); // Sesuaikan X untuk kolom sell
+   int yArea   = IsDashboardVisible ? 140 : UI_OFFSCREEN;
+   int yNewsH  = IsDashboardVisible ? 720 : UI_OFFSCREEN;
+   int yNewsR0 = IsDashboardVisible ? 740 : UI_OFFSCREEN;
 
+   DrawNativeLabel(PREF + "Lbl_Buy_Area_Width", buyPipsText, 20, yArea, clrDarkSlateGray); 
+   DrawNativeLabel(PREF + "Lbl_Sell_Area_Width", sellPipsText, 160, yArea, clrDarkSlateGray);
 
-   // 3. RENDER DATA BERITA HIGH IMPACT USD (Maksimal 3 Baris)
    GetHighImpactUSDNews();
 
-   DrawNativeLabel(PREF + "Lbl_News_Header", "=== TODAY'S HIGH USD NEWS ===", 20, 720, clrRed);
+   DrawNativeLabel(PREF + "Lbl_News_Header", "=== TODAY'S HIGH USD NEWS ===", 20, yNewsH, clrRed);
 
    for(int i = 0; i < 3; i++)
    {
@@ -368,11 +367,10 @@ void UpdateDashboard()
       }
       else if(i > 0)
       {
-         newsText = ""; // Kosongkan baris 2 & 3 jika tidak ada event berita lagi
+         newsText = "";
       }
 
-      // Cetak berurutan ke bawah (kelipatan 18 pixel dari koordinat Y=200)
-      DrawNativeLabel(labelName, newsText, 20, 740 + (i * 18), clrRed);
+      DrawNativeLabel(labelName, newsText, 20, yNewsR0 + (i * 18), clrRed);
    }
 }
 
@@ -424,8 +422,8 @@ void ApplyQuoteVisibility()
    int yQuote  = IsQuoteVisible ? 75  : UI_OFFSCREEN;
    int yQuote2 = IsQuoteVisible ? 100 : UI_OFFSCREEN;
 
-   if(ObjectFind(0, PREF + "Quote")  >= 0) ObjectSetInteger(0, PREF + "Quote",  OBJPROP_YDISTANCE, yQuote);
-   if(ObjectFind(0, PREF + "Quote2") >= 0) ObjectSetInteger(0, PREF + "Quote2", OBJPROP_YDISTANCE, yQuote2);
+   DrawNativeLabel(PREF + "Quote",  "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), yQuote,  clrBlack);
+   DrawNativeLabel(PREF + "Quote2", "Jam Trading: 05-08 WIB, 16-19 WIB",              (PANEL_W + 20), yQuote2, clrBlack);
 }
 
 // --- HELPER MAKER OBJEK DASHBOARD NATIVE (ANTI-TEKS KEPOTONG) ---
@@ -791,7 +789,8 @@ void CreateDashboard() {
    CreateButton("Reset", 20, UI_Y + 530, PANEL_W-20, 30, "ResetLines & Calc", clrGray, clrBlack);
    CreateButton("BuyNow", 20, UI_Y + 570, 230, 30, "Buy Now", clrDodgerBlue, clrWhite);
    CreateButton("SellNow", sellColumnX, UI_Y + 570, 230, 30, "Sell Now", clrOrangeRed, clrWhite);
-   
+   ApplyQuoteVisibility();
+
    // Tambahkan ini di setiap fungsi pembuatan tombol/label dashboard Anda
    ObjectSetInteger(0, "BtnBuyL", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
    ObjectSetInteger(0, "BtnSellL", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
@@ -904,24 +903,36 @@ void CloseAllOrders(ulong magic)
 }
 
 int GetInitialY(string name) {
-   if(StringFind(name, "HdrPanel") != -1) return HEADER_Y;
-   if(StringFind(name, "HideQuote") != -1 || name == PREF+"Hide") return HEADER_Y + 7;
-   if(StringFind(name, "Title") != -1) return HEADER_Y + 2; 
-   if(StringFind(name, "Panel") != -1) return UI_Y;
-   if(StringFind(name, "LblLayers") != -1 || StringFind(name, "InpLayers") != -1 || StringFind(name, "LblLot") != -1 || StringFind(name, "InpLot") != -1) return UI_Y + 18;
-   if(StringFind(name, "BtnDraw") != -1 || StringFind(name, "BtnScanSD") != -1) return UI_Y + 80;
-   if(StringFind(name, "HdrBuy") != -1 || StringFind(name, "HdrSell") != -1) return UI_Y + 130;
-   string keywords[] = {"Floor", "Ceiling", "Entry", "Stoploss", "CutLoss", "TP", "Area"};
-   int rows[]        = { 0,       0,         1,       2,          3,         4,         5     };
-   for(int i=0; i<7; i++) {
-      if(StringFind(name, keywords[i]) != -1) return UI_Y + 165 + (rows[i] * 30);
+   if(name == PREF+"HdrPanel") return HEADER_Y;
+   if(name == PREF+"Hide" || name == PREF+"HideQuote") return HEADER_Y + 7;
+   if(name == PREF+"Title") return HEADER_Y + 2;
+   if(name == PREF+"Live_Clock") return 50;
+   if(name == PREF+"Quote") return 75;
+   if(name == PREF+"Quote2") return 100;
+   if(name == PREF+"Panel") return UI_Y;
+   if(name == PREF+"LblLayers" || name == PREF+"LblLot") return UI_Y + 12;
+   if(name == PREF+"InpLayers" || name == PREF+"InpLot") return UI_Y + 18;
+   if(name == PREF+"BtnDraw" || name == PREF+"BtnScanSD") return UI_Y + 80;
+   if(name == PREF+"HdrBuy" || name == PREF+"HdrSell") return UI_Y + 130;
+   if(name == PREF+"Lbl_Buy_Area_Width" || name == PREF+"Lbl_Sell_Area_Width") return 140;
+
+   string bLabels[]={"Floor","Entry","Stoploss","CutLoss","TP","Area"};
+   string sLabels[]={"Ceiling","Entry","Stoploss","CutLoss","TP","Area"};
+   for(int i=0; i<6; i++) {
+      int rowY = UI_Y + 165 + (i * 30);
+      if(name == PREF+"LB_"+bLabels[i] || name == PREF+"LS_"+sLabels[i]) return rowY;
+      if(name == PREF+"Buy_"+bLabels[i] || name == PREF+"Sell_"+sLabels[i]) return rowY + 4;
    }
-   if(StringFind(name, "BtnBuyL") != -1 || StringFind(name, "BtnSellL") != -1) return UI_Y + 370;
-   if(StringFind(name, "DelBuy") != -1 || StringFind(name, "DelSell") != -1) return UI_Y + 410;
-   if(StringFind(name, "ClosePos") != -1) return UI_Y + 450;
-   if(StringFind(name, "CloseOrd") != -1) return UI_Y + 490;
-   if(StringFind(name, "Reset") != -1) return UI_Y + 530;
-   if(StringFind(name, "BuyNow") != -1) return UI_Y + 570;
-   if(StringFind(name, "SellNow") != -1) return UI_Y + 570;
+
+   if(name == PREF+"BtnBuyL" || name == PREF+"BtnSellL") return UI_Y + 370;
+   if(name == PREF+"DelBuy" || name == PREF+"DelSell") return UI_Y + 410;
+   if(name == PREF+"ClosePos") return UI_Y + 450;
+   if(name == PREF+"CloseOrd") return UI_Y + 490;
+   if(name == PREF+"Reset") return UI_Y + 530;
+   if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 570;
+   if(name == PREF+"Lbl_News_Header") return 720;
+   if(name == PREF+"Lbl_News_Row_0") return 740;
+   if(name == PREF+"Lbl_News_Row_1") return 758;
+   if(name == PREF+"Lbl_News_Row_2") return 776;
    return UI_Y;
 }

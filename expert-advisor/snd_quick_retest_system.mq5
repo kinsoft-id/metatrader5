@@ -129,9 +129,6 @@ void OnTick() {
    datetime serverTime = TimeCurrent();
    string liveClock = TimeToString(serverTime, TIME_MINUTES | TIME_SECONDS);
    DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
-   DrawNativeLabel(PREF + "Quote", "Price Attempts to Come Back!", (PANEL_W + 20), 75, clrBlack);
-   DrawNativeLabel(PREF + "Quote2", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 100, clrBlack);
-   DrawNativeLabel(PREF + "Quote3", "Jam Trading: 08-16 WIB, 20-22 WIB", (PANEL_W + 20), 125, clrBlack);
    ApplyQuoteVisibility();
 
    static datetime lastBarTime = 0;
@@ -147,17 +144,10 @@ void OnTimer()
 {
    // Matikan timer agar fungsi ini hanya berjalan 1x saat start
    EventKillTimer();
-   
-   // 1. UPDATE JAM DIGITAL (Berjalan murni setiap 1 detik)
-   datetime serverTime = TimeCurrent(); // Gunakan TimeCurrent agar singkron dengan market, atau TimeLocal() untuk jam PC
-   string liveClock = TimeToString(serverTime, TIME_MINUTES | TIME_SECONDS);
-   
-   DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
-   DrawNativeLabel(PREF + "Quote", "Price Attempts to Come Back!", (PANEL_W + 20), 75, clrBlack);
-   DrawNativeLabel(PREF + "Quote2", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 100, clrBlack);
-   DrawNativeLabel(PREF + "Quote3", "Entry Counter Trend 1x entry RR 1:1 Maksimal 2x Pantulan", (PANEL_W + 20), 125, clrBlack);
-   ApplyQuoteVisibility();
-   
+   DrawNativeLabel(PREF + "Skor1", "Skor 1: PLN, Whitespace, Flip, Kiss/Quick Retest, Front Running", (PANEL_W + 20), 75, clrBlack);
+   DrawNativeLabel(PREF + "Skor2", "Skor 2: SR (Sering Respon), Curve/PAC, Fibo, Profit Zone", (PANEL_W + 20), 100, clrBlack);
+   DrawNativeLabel(PREF + "Quote1", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 125, clrBlack);
+   DrawNativeLabel(PREF + "Quote2", "Jam Trading: 08-16 WIB, 20-22 WIB", (PANEL_W + 20), 150, clrBlack);
    ChartRedraw();
 }
 
@@ -182,9 +172,10 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
                name != PREF+"Hide" &&
                name != PREF+"HideQuote" &&
                name != PREF+"Live_Clock" &&
-               name != PREF+"Quote" &&
-               name != PREF+"Quote2" &&
-               name != PREF+"Quote3") { 
+               name != PREF+"Skor1" &&
+               name != PREF+"Skor2" &&
+               name != PREF+"Quote1" &&
+               name != PREF+"Quote2") { 
                ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? GetInitialY(name) : UI_OFFSCREEN); 
             } 
          }
@@ -365,13 +356,15 @@ void GetHighImpactUSDNews()
 // --- SHOW / HIDE QUOTE LABELS ---
 void ApplyQuoteVisibility()
 {
-   int yQuote  = IsQuoteVisible ? 75  : UI_OFFSCREEN;
-   int yQuote2 = IsQuoteVisible ? 100 : UI_OFFSCREEN;
-   int yQuote3 = IsQuoteVisible ? 125 : UI_OFFSCREEN;
+   int ySkor1  = IsQuoteVisible ? 75  : UI_OFFSCREEN;
+   int ySkor2  = IsQuoteVisible ? 100 : UI_OFFSCREEN;
+   int yQuote1 = IsQuoteVisible ? 125 : UI_OFFSCREEN;
+   int yQuote2 = IsQuoteVisible ? 150 : UI_OFFSCREEN;
 
-   if(ObjectFind(0, PREF + "Quote")  >= 0) ObjectSetInteger(0, PREF + "Quote",  OBJPROP_YDISTANCE, yQuote);
+   if(ObjectFind(0, PREF + "Skor1")  >= 0) ObjectSetInteger(0, PREF + "Skor1",  OBJPROP_YDISTANCE, ySkor1);
+   if(ObjectFind(0, PREF + "Skor2")  >= 0) ObjectSetInteger(0, PREF + "Skor2",  OBJPROP_YDISTANCE, ySkor2);
+   if(ObjectFind(0, PREF + "Quote1") >= 0) ObjectSetInteger(0, PREF + "Quote1", OBJPROP_YDISTANCE, yQuote1);
    if(ObjectFind(0, PREF + "Quote2") >= 0) ObjectSetInteger(0, PREF + "Quote2", OBJPROP_YDISTANCE, yQuote2);
-   if(ObjectFind(0, PREF + "Quote3") >= 0) ObjectSetInteger(0, PREF + "Quote3", OBJPROP_YDISTANCE, yQuote3);
 }
 
 // --- HELPER MAKER OBJEK DASHBOARD NATIVE (ANTI-TEKS KEPOTONG) ---
@@ -927,6 +920,11 @@ int GetInitialY(string name) {
    if(name == PREF+"Hide") return HEADER_Y + 7;
    if(name == PREF+"HideQuote") return HEADER_Y + 7;
    if(name == PREF+"Title") return HEADER_Y + 2;
+   if(name == PREF+"Live_Clock") return 50;
+   if(name == PREF+"Skor1") return 75;
+   if(name == PREF+"Skor2") return 100;
+   if(name == PREF+"Quote1") return 125;
+   if(name == PREF+"Quote2") return 150;
    if(name == PREF+"Panel") return UI_Y;
    if(name == PREF+"LblLayers" || name == PREF+"InpLayers" || name == PREF+"BtnLotMode" || name == PREF+"InpLot") return UI_Y + 12;
    if(name == PREF+"LblCalcLot") return UI_Y + 45;
