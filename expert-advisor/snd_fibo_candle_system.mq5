@@ -1105,16 +1105,17 @@ void CreateFiboTradeButton(const string name, const datetime t, const double pri
    if(ObjectFind(0, name) >= 0)
       ObjectDelete(0, name);
 
-   ObjectCreate(0, name, OBJ_TEXT, 0, t, price);
-   ObjectSetString(0, name, OBJPROP_TEXT, text);
-   ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
-   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 9);
+   ObjectCreate(0, name, OBJ_ARROW, 0, t, price);
+   ObjectSetInteger(0, name, OBJPROP_ARROWCODE, 108);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_RIGHT);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, true);
+   ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
    ObjectSetInteger(0, name, OBJPROP_BACK, false);
-   ObjectSetInteger(0, name, OBJPROP_ZORDER, 20);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, 25);
+   ObjectSetString(0, name, OBJPROP_TOOLTIP, text);
 }
 
 void ApplyFiboObjectStyle(const string fiboName)
@@ -1227,8 +1228,8 @@ void UpdateFiboTradeButtons()
    if(!g_fiboActive)
       return;
 
-   datetime tBuy  = g_fiboTime - PeriodSeconds() * 3;
-   datetime tSell = g_fiboTime;
+   datetime tBuy  = g_fiboTime - PeriodSeconds() * 2;
+   datetime tSell = g_fiboTime - PeriodSeconds();
 
    for(int lv = 1; lv <= 5; lv++)
    {
@@ -1237,14 +1238,22 @@ void UpdateFiboTradeButtons()
       string sellName = FIBO_PREF + "SELL_" + IntegerToString(lv);
 
       if(ObjectFind(0, buyName) >= 0)
+      {
          ObjectMove(0, buyName, 0, tBuy, price);
+         ObjectSetInteger(0, buyName, OBJPROP_COLOR, clrLime);
+         ObjectSetInteger(0, buyName, OBJPROP_WIDTH, 1);
+      }
       else
-         CreateFiboTradeButton(buyName, tBuy, price, "Buy L ", clrDodgerBlue);
+         CreateFiboTradeButton(buyName, tBuy, price, "Buy L", clrLime);
 
       if(ObjectFind(0, sellName) >= 0)
+      {
          ObjectMove(0, sellName, 0, tSell, price);
+         ObjectSetInteger(0, sellName, OBJPROP_COLOR, clrRed);
+         ObjectSetInteger(0, sellName, OBJPROP_WIDTH, 1);
+      }
       else
-         CreateFiboTradeButton(sellName, tSell, price, "Sell L ", clrOrangeRed);
+         CreateFiboTradeButton(sellName, tSell, price, "Sell L", clrRed);
    }
 }
 
@@ -1330,10 +1339,10 @@ void ScanFiboCandle(const int shiftParam)
       ObjectSetString(0, fiboName, OBJPROP_LEVELTEXT, i, " " + levelTxt[i]);
    }
 
+   g_fiboActive = true;
    UpdateFiboTradeButtons();
    CreateFiboAnchorLines();
 
-   g_fiboActive = true;
    Print("Scan Fibo Candle shift=", shift,
          " ", (g_fiboBullish ? "bullish" : "bearish"),
          " time=", TimeToString(g_fiboTime),
