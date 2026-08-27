@@ -116,6 +116,8 @@ void PlaceFiboBuyAll();
 void PlaceFiboSellAll();
 double FiboRatio(const double v);
 double FiboOppTarget();
+double FiboLevelNeg618();
+double FiboLevelPos1618();
 double FiboPriceFromLow(const double levelInput);
 double FiboChartPrice(const double levelInput);
 double GetFiboLevelInput(const int levelIdx);
@@ -838,9 +840,9 @@ void PlaceBuyNow() {
 
    if(g_fiboActive)
    {
-      tp = FiboChartPrice(FiboOppTarget());
+      tp = FiboChartPrice(FiboLevelNeg618());
       if(tp <= entry)
-         tp = FiboChartPrice(InpFiboTarget);
+         tp = FiboPriceFromLow(FiboLevelPos1618());
    }
 
    if(lot <= 0) {
@@ -868,9 +870,9 @@ void PlaceSellNow() {
 
    if(g_fiboActive)
    {
-      tp = FiboChartPrice(InpFiboTarget);
+      tp = FiboChartPrice(FiboLevelNeg618());
       if(tp >= entry)
-         tp = FiboChartPrice(FiboOppTarget());
+         tp = FiboChartPrice(FiboLevelPos1618());
    }
 
    if(lot <= 0) {
@@ -1071,7 +1073,7 @@ void CreateFiboTradeButton(const string name, const datetime t, const double pri
    ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 9);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_RIGHT);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, true);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
    ObjectSetInteger(0, name, OBJPROP_BACK, false);
@@ -1163,14 +1165,14 @@ void ScanFiboCandle(const int shiftParam)
       ObjectSetString(0, fiboName, OBJPROP_LEVELTEXT, i, " " + levelTxt[i]);
    }
 
-   datetime tBuy  = t2 + PeriodSeconds() * 7;
-   datetime tSell = t2 + PeriodSeconds() * 12;
+   datetime tBuy  = g_fiboTime - PeriodSeconds() * 5;
+   datetime tSell = g_fiboTime;
 
    for(int lv = 1; lv <= 5; lv++)
    {
       double price = FiboChartPrice(GetFiboLevelInput(lv));
-      CreateFiboTradeButton(FIBO_PREF + "BUY_" + IntegerToString(lv), tBuy, price, "  Buy L", clrDodgerBlue);
-      CreateFiboTradeButton(FIBO_PREF + "SELL_" + IntegerToString(lv), tSell, price, "  Sell L", clrOrangeRed);
+      CreateFiboTradeButton(FIBO_PREF + "BUY_" + IntegerToString(lv), tBuy, price, "Buy L ", clrDodgerBlue);
+      CreateFiboTradeButton(FIBO_PREF + "SELL_" + IntegerToString(lv), tSell, price, "Sell L ", clrOrangeRed);
    }
 
    g_fiboActive = true;
