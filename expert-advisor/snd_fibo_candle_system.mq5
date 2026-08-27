@@ -27,6 +27,7 @@ input color  InpFiboColor       = clrDodgerBlue;
 input int    InpFiboWidth       = 2;
 input bool   InpFiboRayRight    = true;   // Ray ke kanan
 input bool   InpFiboCutLoss     = true;   // Cut loss: close body vs garis 78.6
+input bool   InpFiboCutProfit   = true;   // Cut profit: sentuh 78.6, tutup di 38.2
 
 // Struktur untuk menyimpan data berita yang sudah disaring
 struct USDNewsData {
@@ -71,7 +72,8 @@ bool     g_pickFiboCandle = false;
 bool     g_fiboBullish = true;
 double   g_fiboHigh = 0.0;
 double   g_fiboLow  = 0.0;
-datetime g_fiboTime = 0; 
+datetime g_fiboTime = 0;
+bool     g_fiboCutProfitArmed = false;
 
 // --- Function Declarations ---
 void CreateDashboard();
@@ -122,7 +124,13 @@ double GetFiboLevelInput(const int levelIdx);
 void CreateFiboTradeButton(const string name, const datetime t, const double price, const string text, const color clr);
 void PlaceLimitOrder(const bool isBuy, const double entry, const double sl, const double tp, const string comment, const double lotMult=1.0);
 void CheckFiboCutLoss();
+void CheckFiboCutProfit();
 void CutFiboTrades(const bool isBuy);
+bool HasFibo786Trade();
+bool Fibo786TouchedOnLastBar();
+bool IsFiboOnChart();
+void EnsureFiboScanned();
+void DeleteFiboPending(const bool isBuy);
 
 //+------------------------------------------------------------------+
 //| Initialization                                                   |
@@ -175,6 +183,7 @@ void OnTick() {
    if(curBarTime != lastBarTime) {
       lastBarTime = curBarTime;
       CheckFiboCutLoss();
+      CheckFiboCutProfit();
       ScanSD();
    }
 }
@@ -1076,6 +1085,7 @@ void ClearFiboCandle()
    g_fiboHigh = 0.0;
    g_fiboLow  = 0.0;
    g_fiboTime = 0;
+   g_fiboCutProfitArmed = false;
 }
 
 void ScanFiboCandle(const int shiftParam)
@@ -1386,13 +1396,15 @@ void PlaceFiboSellLimit(const int levelIdx)
 
 void PlaceFiboBuyAll()
 {
-   if(!g_fiboActive)
-      ScanFiboCandle();
+   EnsureFiboScanned();
    if(!g_fiboActive)
    {
       Print("Buy L Fibo: scan fibo gagal.");
       return;
    }
+
+   DeleteFiboPending(true);
+   DeleteFiboPending(false);
 
    Print("Buy L Fibo: order semua level 23.6 / 38.2 / 50 / 61.8 / 78.6");
    for(int lv = 1; lv <= 5; lv++)
@@ -1401,17 +1413,75 @@ void PlaceFiboBuyAll()
 
 void PlaceFiboSellAll()
 {
-   if(!g_fiboActive)
-      ScanFiboCandle();
+   EnsureFiboScanned();
    if(!g_fiboActive)
    {
       Print("Sell L Fibo: scan fibo gagal.");
       return;
    }
 
+   DeleteFiboPending(false);
+   DeleteFiboPending(true);
+
    Print("Sell L Fibo: order semua level 23.6 / 38.2 / 50 / 61.8 / 78.6");
    for(int lv = 1; lv <= 5; lv++)
       PlaceFiboSellLimit(lv);
+}
+
+bool IsFiboOnChart()
+{
+   if(!g_fiboActive)
+      return false;
+   if(ObjectFind(0, FIBO_PREF + "OBJ") < 0)
+   {
+      g_fiboActive = false;
+      g_fiboHigh = 0.0;
+      g_fiboLow  = 0.0;
+      g_fiboTime = 0;
+      return false;
+   }
+   return true;
+}
+
+void EnsureFiboScanned()
+{
+   if(IsFiboOnChart())
+      return;
+   ScanFiboCandle(-1);
+}
+
+void DeleteFiboPending(const bool isBuy)
+{
+   string tag = isBuy ? "FiboBuy" : "FiboSell";
+   int deletedOrd = 0;
+
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = OrderGetTicket(i);
+      if(ticket == 0 || !OrderSelect(ticket))
+         continue;
+      if(OrderGetString(ORDER_SYMBOL) != _Symbol)
+         continue;
+      if((ulong)OrderGetInteger(ORDER_MAGIC) != InpMagicNumber)
+         continue;
+      if(StringFind(OrderGetString(ORDER_COMMENT), tag) < 0)
+         continue;
+
+      ENUM_ORDER_TYPE type = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+      bool match = false;
+      if(isBuy)
+         match = (type == ORDER_TYPE_BUY_LIMIT || type == ORDER_TYPE_BUY_STOP);
+      else
+         match = (type == ORDER_TYPE_SELL_LIMIT || type == ORDER_TYPE_SELL_STOP);
+      if(!match)
+         continue;
+
+      if(trade.OrderDelete(ticket))
+         deletedOrd++;
+   }
+
+   if(deletedOrd > 0)
+      Print("Hapus pending ", tag, ": ", deletedOrd);
 }
 
 void CheckFiboCutLoss()
@@ -1440,6 +1510,93 @@ void CheckFiboCutLoss()
             " (", DoubleToString(level78, _Digits), ")");
       CutFiboTrades(true);
    }
+}
+
+bool HasFibo786Trade()
+{
+   string lvl786 = DoubleToString(InpFiboLevel5, 1);
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol)
+         continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber)
+         continue;
+
+      string cmt = PositionGetString(POSITION_COMMENT);
+      if(StringFind(cmt, "FiboBuy") < 0 && StringFind(cmt, "FiboSell") < 0)
+         continue;
+      if(StringFind(cmt, lvl786) >= 0)
+         return true;
+   }
+
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = OrderGetTicket(i);
+      if(ticket == 0 || !OrderSelect(ticket))
+         continue;
+      if(OrderGetString(ORDER_SYMBOL) != _Symbol)
+         continue;
+      if((ulong)OrderGetInteger(ORDER_MAGIC) != InpMagicNumber)
+         continue;
+
+      string cmt = OrderGetString(ORDER_COMMENT);
+      if(StringFind(cmt, "FiboBuy") < 0 && StringFind(cmt, "FiboSell") < 0)
+         continue;
+      if(StringFind(cmt, lvl786) >= 0)
+         return true;
+   }
+
+   return false;
+}
+
+bool Fibo786TouchedOnLastBar()
+{
+   if(!g_fiboActive)
+      return false;
+
+   datetime closedTime = iTime(_Symbol, _Period, 1);
+   if(closedTime <= 0 || closedTime <= g_fiboTime)
+      return false;
+
+   double level78 = FiboChartPrice(InpFiboLevel5);
+   double high = iHigh(_Symbol, _Period, 1);
+   double low  = iLow(_Symbol, _Period, 1);
+   if(low > level78 || high < level78)
+      return false;
+
+   return HasFibo786Trade();
+}
+
+void CheckFiboCutProfit()
+{
+   if(!InpFiboCutProfit || !g_fiboActive)
+      return;
+
+   if(HasFibo786Trade() || Fibo786TouchedOnLastBar())
+      g_fiboCutProfitArmed = true;
+
+   if(!g_fiboCutProfitArmed)
+      return;
+
+   datetime closedTime = iTime(_Symbol, _Period, 1);
+   if(closedTime <= 0 || closedTime <= g_fiboTime)
+      return;
+
+   double level382 = FiboChartPrice(InpFiboLevel2);
+   double high = iHigh(_Symbol, _Period, 1);
+   double low  = iLow(_Symbol, _Period, 1);
+   if(low > level382 || high < level382)
+      return;
+
+   Print("Cut profit: harga sentuh garis ", DoubleToString(InpFiboLevel2, 1),
+         " (", DoubleToString(level382, _Digits), "). Tutup semua posisi/order EA.");
+   CloseAllPositions();
+   CloseAllOrders();
+   g_fiboCutProfitArmed = false;
 }
 
 void CutFiboTrades(const bool isBuy)
