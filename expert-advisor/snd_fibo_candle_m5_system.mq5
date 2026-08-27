@@ -1163,8 +1163,8 @@ void ScanFiboCandle(const int shiftParam)
       ObjectSetString(0, fiboName, OBJPROP_LEVELTEXT, i, " " + levelTxt[i]);
    }
 
-   datetime tBuy  = t2 + PeriodSeconds() * 12;
-   datetime tSell = t2 + PeriodSeconds() * 17;
+   datetime tBuy  = t2 + PeriodSeconds() * 7;
+   datetime tSell = t2 + PeriodSeconds() * 12;
 
    for(int lv = 1; lv <= 5; lv++)
    {
