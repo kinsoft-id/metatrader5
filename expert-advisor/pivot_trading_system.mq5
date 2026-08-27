@@ -35,7 +35,7 @@ USDNewsData listNews[3]; // Maksimal menampung 3 berita terdekat
 // Variabel global untuk menyimpan handle indikator MT5
 int handleMultiEMA;
 input group "--- RISK & TRANSMISSION ---"
-input ulong InpMagicNumber = 11111; // Magic Number (Harus beda tiap chart)
+input ulong InpMagicNumber = 6060; // Magic Number (Harus beda tiap chart)
 
 
 CTrade trade;
@@ -72,9 +72,9 @@ void CreateObject(string name, ENUM_OBJECT type, int win, int x, int y, int w, i
 void CreateLabel(string name, int x, int y, string text, color clr);
 void CreateButton(string name, int x, int y, int w, int h, string text, color bg, color txtClr);
 void CreateEdit(string name, int x, int y, int w, int h, string val);
-void DelPO(ENUM_ORDER_TYPE type);
-void CloseAllPositions();
-void CloseAllOrders();
+void DelPO(ENUM_ORDER_TYPE type, ulong magic=0);
+void CloseAllPositions(ulong magic);
+void CloseAllOrders(ulong magic);
 void ApplyQuoteVisibility();
 void DrawNativeLabel(string name, string text, int x, int y, color clr);
 
@@ -854,51 +854,27 @@ void DelPO(ENUM_ORDER_TYPE type, ulong magic = 0)
       }
    }
 }
-// Contoh modifikasi fungsi Close Position agar hanya menutup milik chart aktif
 void CloseAllPositions(ulong magic)
 {
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
-      if(PositionGetSymbol(i) == _Symbol)
-      {
-         // Saring berdasarkan Magic Number
-         if(PositionGetInteger(POSITION_MAGIC) == magic)
-         {
-            ulong ticket = PositionGetInteger(POSITION_TICKET);
-            trade.PositionClose(ticket); // trade adalah object dari CTrade
-         }
-      }
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != magic) continue;
+      trade.PositionClose(ticket);
    }
 }
 
-// --- PERBAIKAN TOTAL: FUNGSI HAPUS SEMUA PENDING ORDER BERDASARKAN MAGIC NUMBER ---
 void CloseAllOrders(ulong magic)
 {
-   // Lakukan loop mundur dari order paling akhir ke awal
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
-      // 1. Ambil ticket order berdasarkan posisinya di daftar antrean
       ulong ticket = OrderGetTicket(i);
-      
-      if(ticket > 0)
-      {
-         // 2. Wajib gunakan OrderSelect() atau ambil data via properti ticket di MT5
-         string orderSymbol = OrderGetString(ORDER_SYMBOL);
-         ulong  orderMagic  = OrderGetInteger(ORDER_MAGIC);
-         long   orderType   = OrderGetInteger(ORDER_TYPE);
-         
-         // 3. Pastikan hanya menghapus order yang sesuai dengan Symbol dan Magic Number chart ini
-         if(orderSymbol == _Symbol && orderMagic == magic)
-         {
-            // 4. Filter ekstra: Pastikan yang dihapus adalah LIMIT ORDER (bukan posisi running)
-            if(orderType == ORDER_TYPE_BUY_LIMIT || orderType == ORDER_TYPE_SELL_LIMIT ||
-               orderType == ORDER_TYPE_BUY_STOP  || orderType == ORDER_TYPE_SELL_STOP)
-            {
-               // trade adalah objek CTrade bawaan EA Anda
-               trade.OrderDelete(ticket);
-            }
-         }
-      }
+      if(!OrderSelect(ticket)) continue;
+      if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
+      if((ulong)OrderGetInteger(ORDER_MAGIC) != magic) continue;
+      trade.OrderDelete(ticket);
    }
 }
 
