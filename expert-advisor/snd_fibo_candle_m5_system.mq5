@@ -29,6 +29,12 @@ input bool   InpFiboRayRight    = true;   // Ray ke kanan
 input bool   InpFiboCutLoss     = true;   // Cut loss: close body vs garis 78.6
 input bool   InpFiboCutProfit   = true;   // Cut profit: pending 78.6 kebuka, tutup di 38.2
 
+input group "--- ZIGZAG SEGMENT ---"
+input bool   InpLoadZigZagSeg   = true;              // Auto-load indikator ZigZag Segment
+input string InpZigZagPath      = "zigzag_segment";  // Nama file indikator (folder Indicators)
+
+#define ZZSEG_PREFIX "ZZSEG_"
+
 // Struktur untuk menyimpan data berita yang sudah disaring
 struct USDNewsData {
    datetime time;
@@ -69,11 +75,14 @@ int UI_OFFSCREEN = -2000;
 
 bool     g_fiboActive = false;
 bool     g_pickFiboCandle = false;
+bool     g_pickZzSeg = false;
+int      g_zzSegHandle = INVALID_HANDLE;
 bool     g_fiboBullish = true;
 double   g_fiboHigh = 0.0;
 double   g_fiboLow  = 0.0;
 datetime g_fiboTime = 0;
 bool     g_fiboCutProfitArmed = false;
+datetime g_fiboCutProfitArmBar = 0;
 
 // --- Function Declarations ---
 void CreateDashboard();
@@ -109,8 +118,18 @@ double GetRiskBaseAmount();
 double CalcLotPerLayer(ENUM_ORDER_TYPE orderType, double entry, double sl, int layerCount, double riskPct);
 double GetResolvedLot(ENUM_ORDER_TYPE orderType, double entry, double sl);
 void ScanFiboCandle(const int shiftParam=-1);
+void ScanFiboFromZzSegment(const string zzSegName);
+void SetupFiboObjectLevels(const string fiboName);
+void RemoveZigZagSegmentFromChart();
+void LoadZigZagSegmentIndicator();
+bool ChartHasZigZagSegment();
+void CleanupZzSegFiboObjects();
+void ApplyZzSegPickStyle(const bool pickOn);
 void SetPickFiboMode(const bool on);
+void SetPickZzSegMode(const bool on);
 void PickFiboAtChart(const int x, const int y);
+void PickZzSegAtChart(const int x, const int y);
+bool FindZzSegmentAtClick(const int x, const int y, string &outSegName);
 void ClearFiboCandle();
 void PlaceFiboBuyLimit(const int levelIdx);
 void PlaceFiboSellLimit(const int levelIdx);
@@ -135,7 +154,10 @@ void OnFiboAnchorDragged();
 void PlaceLimitOrder(const bool isBuy, const double entry, const double sl, const double tp, const string comment, const double lotMult=1.0);
 void CheckFiboCutLoss();
 void CheckFiboCutProfit();
+bool FiboPriceTouchesLevel(const double level);
+bool FiboCutProfitLevelReached();
 void CutFiboTrades(const bool isBuy);
+bool HasFiboPositionSide(const bool isBuy);
 bool HasFibo786Position();
 bool Fibo786FilledOnLastBar();
 bool IsFiboOnChart();
@@ -173,6 +195,9 @@ int OnInit()
       UpdateFiboTradeButtons();
    }
 
+   if(InpLoadZigZagSeg)
+      LoadZigZagSegmentIndicator();
+
    // --- KUNCI: Aktifkan timer 1 detik untuk detak jam ---
    // --- WAJIB DI PALING BAWAH SEBELUM RETURN ---
    ResetLastError();
@@ -188,6 +213,7 @@ void OnDeinit(const int reason)
 { 
    ObjectsDeleteAll(0, PREF); 
    ObjectsDeleteAll(0, ZONE_PREF); 
+   RemoveZigZagSegmentFromChart();
    ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrWhite);
 }
 
@@ -197,13 +223,13 @@ void OnTick() {
    string liveClock = TimeToString(serverTime, TIME_MINUTES | TIME_SECONDS);
    DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
    ApplyQuoteVisibility();
+   CheckFiboCutProfit();
 
    static datetime lastBarTime = 0;
    datetime curBarTime = iTime(_Symbol, _Period, 0);
    if(curBarTime != lastBarTime) {
       lastBarTime = curBarTime;
       CheckFiboCutLoss();
-      CheckFiboCutProfit();
       ScanSD();
    }
 }
@@ -245,7 +271,13 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    
    if(id == CHARTEVENT_OBJECT_CLICK)
    {
-      if(sparam == PREF+"Hide") { 
+      if(g_pickZzSeg && StringFind(sparam, ZZSEG_PREFIX) == 0)
+      {
+         ScanFiboFromZzSegment(sparam);
+         SetPickZzSegMode(false);
+         ChartRedraw();
+      }
+      else if(sparam == PREF+"Hide") { 
          IsDashboardVisible = !IsDashboardVisible; 
          ObjectSetString(0, PREF+"Hide", OBJPROP_TEXT, IsDashboardVisible ? "Hide" : "Show");
          for(int i=0; i<ObjectsTotal(0); i++) { 
@@ -287,12 +319,20 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       else if(sparam == PREF+"BtnDraw") { CreateDrawingLines(); CalculateAndDrawAll(); ObjectSetInteger(0, PREF+"BtnDraw", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BtnScanFibo") {
          SetPickFiboMode(false);
+         SetPickZzSegMode(false);
          ScanFiboCandle();
          ObjectSetInteger(0, PREF+"BtnScanFibo", OBJPROP_STATE, false);
       }
       else if(sparam == PREF+"BtnPickFibo") {
+         SetPickZzSegMode(false);
          SetPickFiboMode(!g_pickFiboCandle);
          ObjectSetInteger(0, PREF+"BtnPickFibo", OBJPROP_STATE, false);
+         ChartRedraw();
+      }
+      else if(sparam == PREF+"BtnPickZzSeg") {
+         SetPickFiboMode(false);
+         SetPickZzSegMode(!g_pickZzSeg);
+         ObjectSetInteger(0, PREF+"BtnPickZzSeg", OBJPROP_STATE, false);
          ChartRedraw();
       }
       else if(sparam == PREF+"BtnScanSD") { 
@@ -316,6 +356,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ObjectsDeleteAll(0, PREF+"Line_"); ObjectsDeleteAll(0, PREF+"Calc_"); ObjectsDeleteAll(0, PREF+"Layer_"); ObjectsDeleteAll(0, ZONE_PREF);
          ClearFiboCandle();
          SetPickFiboMode(false);
+         SetPickZzSegMode(false);
          IsSDScanning = false; 
          ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "Scan S&D"); ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrDarkGreen);
          if(IsAutoLot && ObjectFind(0, PREF+"LblCalcLot") >= 0)
@@ -390,6 +431,12 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ObjectSetInteger(0, sparam, OBJPROP_SELECTABLE, true);
          ChartRedraw();
       }
+   }
+
+   if(id == CHARTEVENT_CLICK && g_pickZzSeg)
+   {
+      PickZzSegAtChart((int)lparam, (int)dparam);
+      return;
    }
 
    if(id == CHARTEVENT_CLICK && g_pickFiboCandle)
@@ -873,27 +920,33 @@ void PlaceSellLimit() {
 }
 
 void PlaceBuyNow() {
-   double sl = GetInputValue("Buy_Stoploss");
    double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   double lot = GetResolvedLot(ORDER_TYPE_BUY, entry, sl);
-   double tp = BuyTPByLayer(4, entry, sl);
+   double sl = GetInputValue("Buy_Stoploss");
+   double tp = 0.0;
 
    if(g_fiboActive)
    {
+      if(sl <= 0.0 || sl >= entry)
+         sl = FiboPriceFromLow(InpFiboTarget);
       tp = FiboChartPrice(FiboLevelNeg618());
       if(tp <= entry)
          tp = FiboPriceFromLow(FiboLevelPos1618());
    }
+   else
+      tp = BuyTPByLayer(4, entry, sl);
+
+   double lot = GetResolvedLot(ORDER_TYPE_BUY, entry, sl);
 
    if(lot <= 0) {
       Print("Lot size is zero or negative, cannot execute Buy trade.");
       return;
    }
-   if(sl <= 0 || tp <= entry)
+   if(sl <= 0.0 || sl >= entry || tp <= entry)
    {
-      Print("Buy Now: butuh SL < Entry < TP. Scan Fibo jika TP masih kosong.");
+      Print("Buy Now: butuh SL < Entry < TP. SL=", sl, " Entry=", entry, " TP=", tp);
       return;
    }
+   sl = NormalizeDouble(sl, _Digits);
    tp = NormalizeDouble(tp, _Digits);
    UpdateInput("Buy_TP1", tp);
    if(trade.Buy(lot, _Symbol, 0, sl, tp, "BuyNow"))
@@ -903,27 +956,35 @@ void PlaceBuyNow() {
 }
 
 void PlaceSellNow() {
-   double sl = GetInputValue("Sell_Stoploss");
    double entry = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double lot = GetResolvedLot(ORDER_TYPE_SELL, entry, sl);
-   double tp = SellTPByLayer(4, entry, sl);
+   double sl = GetInputValue("Sell_Stoploss");
+   double tp = 0.0;
 
    if(g_fiboActive)
    {
+      if(sl <= entry)
+         sl = FiboPriceFromLow(FiboOppTarget());
       tp = FiboChartPrice(FiboLevelNeg618());
       if(tp >= entry)
          tp = FiboChartPrice(FiboLevelPos1618());
+      if(tp >= entry)
+         tp = FiboPriceFromLow(InpFiboTarget);
    }
+   else
+      tp = SellTPByLayer(4, entry, sl);
+
+   double lot = GetResolvedLot(ORDER_TYPE_SELL, entry, sl);
 
    if(lot <= 0) {
       Print("Lot size is zero or negative, cannot execute Sell trade.");
       return;
    }
-   if(sl <= 0 || tp >= entry)
+   if(sl <= entry || tp >= entry)
    {
-      Print("Sell Now: butuh TP < Entry < SL. Scan Fibo jika TP masih kosong.");
+      Print("Sell Now: butuh TP < Entry < SL. SL=", sl, " Entry=", entry, " TP=", tp);
       return;
    }
+   sl = NormalizeDouble(sl, _Digits);
    tp = NormalizeDouble(tp, _Digits);
    UpdateInput("Sell_TP1", tp);
    if(trade.Sell(lot, _Symbol, 0, sl, tp, "SellNow"))
@@ -1013,8 +1074,9 @@ void CreateDashboard() {
       CreateLabel("LB_"+bL[i], 20, UI_Y+130+(i*30), bL[i], clrOrange); CreateEdit("Buy_"+bL[i], 130, UI_Y+134+(i*30), 110, 25, "0.00");
       CreateLabel("LS_"+sL[i], 270, UI_Y+130+(i*30), sL[i], clrOrange); CreateEdit("Sell_"+sL[i], 370, UI_Y+134+(i*30), 110, 25, "0.00");
    }
-   CreateButton("BtnScanFibo", 20, UI_Y + 375, 230, 30, "Scan Fibo", clrTeal, clrWhite);
-   CreateButton("BtnPickFibo", 270, UI_Y + 375, 210, 30, "Pilih Candle", clrDarkOrange, clrWhite);
+   CreateButton("BtnScanFibo", 20, UI_Y + 375, 150, 30, "Scan Fibo", clrTeal, clrWhite);
+   CreateButton("BtnPickFibo", 175, UI_Y + 375, 150, 30, "Pilih Candle", clrDarkOrange, clrWhite);
+   CreateButton("BtnPickZzSeg", 330, UI_Y + 375, 150, 30, "Pilih ZZ", clrMediumPurple, clrWhite);
    CreateButton("BtnBuyLFibo", 20, UI_Y + 415, 200, 30, "Buy L Fibo", clrDodgerBlue, clrWhite);
    CreateButton("BtnSellLFibo", 270, UI_Y + 415, 200, 30, "Sell L Fibo", clrOrangeRed, clrWhite);
    CreateButton("BtnBuyL", 20, UI_Y + 455, 200, 30, "Buy Limit", clrBlue, clrWhite);
@@ -1278,6 +1340,7 @@ void ClearFiboCandle()
    g_fiboLow  = 0.0;
    g_fiboTime = 0;
    g_fiboCutProfitArmed = false;
+   g_fiboCutProfitArmBar = 0;
 }
 
 void ScanFiboCandle(const int shiftParam)
@@ -1325,6 +1388,22 @@ void ScanFiboCandle(const int shiftParam)
    ObjectSetInteger(0, fiboName, OBJPROP_RAY_LEFT, false);
    ObjectSetInteger(0, fiboName, OBJPROP_RAY_RIGHT, InpFiboRayRight);
    ApplyFiboObjectStyle(fiboName);
+   SetupFiboObjectLevels(fiboName);
+
+   g_fiboActive = true;
+   UpdateFiboTradeButtons();
+   CreateFiboAnchorLines();
+
+   Print("Scan Fibo Candle shift=", shift,
+         " ", (g_fiboBullish ? "bullish" : "bearish"),
+         " time=", TimeToString(g_fiboTime),
+         " high=", DoubleToString(g_fiboHigh, _Digits),
+         " low=", DoubleToString(g_fiboLow, _Digits));
+   ChartRedraw();
+}
+
+void SetupFiboObjectLevels(const string fiboName)
+{
    ObjectSetInteger(0, fiboName, OBJPROP_COLOR, clrNONE);
    ObjectSetInteger(0, fiboName, OBJPROP_STYLE, STYLE_SOLID);
    ObjectSetInteger(0, fiboName, OBJPROP_WIDTH, 0);
@@ -1352,12 +1431,140 @@ void ScanFiboCandle(const int shiftParam)
       ObjectSetInteger(0, fiboName, OBJPROP_LEVELCOLOR, i, InpFiboColor);
       ObjectSetString(0, fiboName, OBJPROP_LEVELTEXT, i, " " + levelTxt[i]);
    }
+}
+
+bool ChartHasZigZagSegment()
+{
+   int total = ChartIndicatorsTotal(0, 0);
+   for(int i = 0; i < total; i++)
+   {
+      string indName = ChartIndicatorName(0, 0, i);
+      if(StringFind(indName, "zigzag_segment") >= 0)
+         return true;
+   }
+   return false;
+}
+
+void LoadZigZagSegmentIndicator()
+{
+   RemoveZigZagSegmentFromChart();
+
+   g_zzSegHandle = iCustom(_Symbol, _Period, InpZigZagPath);
+   if(g_zzSegHandle == INVALID_HANDLE)
+   {
+      Print("ZigZag Segment gagal load (", InpZigZagPath, "). Error: ", GetLastError());
+      return;
+   }
+
+   if(!ChartIndicatorAdd(0, 0, g_zzSegHandle))
+      Print("ChartIndicatorAdd ZigZag Segment gagal. Error: ", GetLastError());
+   else
+      Print("ZigZag Segment loaded: ", InpZigZagPath);
+}
+
+void RemoveZigZagSegmentFromChart()
+{
+   for(int i = ChartIndicatorsTotal(0, 0) - 1; i >= 0; i--)
+   {
+      string indName = ChartIndicatorName(0, 0, i);
+      if(StringFind(indName, "zigzag_segment") >= 0)
+         ChartIndicatorDelete(0, 0, indName);
+   }
+
+   if(g_zzSegHandle != INVALID_HANDLE)
+   {
+      IndicatorRelease(g_zzSegHandle);
+      g_zzSegHandle = INVALID_HANDLE;
+   }
+
+   CleanupZzSegFiboObjects();
+}
+
+void CleanupZzSegFiboObjects()
+{
+   ObjectsDeleteAll(0, ZZSEG_PREFIX);
+}
+
+void ApplyZzSegPickStyle(const bool pickOn)
+{
+   int total = ObjectsTotal(0, 0, -1);
+   for(int i = 0; i < total; i++)
+   {
+      string name = ObjectName(0, i, 0, -1);
+      if(StringFind(name, ZZSEG_PREFIX + "BX_") != 0)
+         continue;
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, pickOn);
+      ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+      ObjectSetInteger(0, name, OBJPROP_BACK, !pickOn);
+      ObjectSetInteger(0, name, OBJPROP_ZORDER, pickOn ? 5 : 0);
+   }
+}
+
+void ScanFiboFromZzSegment(const string zzSegName)
+{
+   string idx = "";
+   if(StringFind(zzSegName, ZZSEG_PREFIX + "BX_") == 0)
+      idx = StringSubstr(zzSegName, StringLen(ZZSEG_PREFIX + "BX_"));
+   else if(StringFind(zzSegName, ZZSEG_PREFIX + "LN_") == 0)
+      idx = StringSubstr(zzSegName, StringLen(ZZSEG_PREFIX + "LN_"));
+   else if(StringFind(zzSegName, ZZSEG_PREFIX + "FB_") == 0)
+      idx = StringSubstr(zzSegName, StringLen(ZZSEG_PREFIX + "FB_"));
+   else
+   {
+      Print("Pilih ZZ: objek segmen tidak valid (", zzSegName, ").");
+      return;
+   }
+
+   string lnName = ZZSEG_PREFIX + "LN_" + idx;
+   if(ObjectFind(0, lnName) < 0)
+   {
+      Print("Pilih ZZ: garis segmen ", lnName, " tidak ditemukan.");
+      return;
+   }
+
+   ClearFiboCandle();
+
+   datetime t0 = (datetime)ObjectGetInteger(0, lnName, OBJPROP_TIME, 0);
+   datetime t1 = (datetime)ObjectGetInteger(0, lnName, OBJPROP_TIME, 1);
+   double p0 = ObjectGetDouble(0, lnName, OBJPROP_PRICE, 0);
+   double p1 = ObjectGetDouble(0, lnName, OBJPROP_PRICE, 1);
+
+   g_fiboTime = (datetime)MathMin((long)t0, (long)t1);
+   g_fiboHigh = MathMax(p0, p1);
+   g_fiboLow  = MathMin(p0, p1);
+   if(g_fiboHigh <= g_fiboLow)
+   {
+      Print("Pilih ZZ: range segmen 0, batal.");
+      return;
+   }
+
+   g_fiboBullish = (p1 > p0);
+
+   string fiboName = FIBO_PREF + "OBJ";
+   if(g_fiboBullish)
+   {
+      ObjectCreate(0, fiboName, OBJ_FIBO, 0, t0, p0, t1, p1);
+      ObjectSetDouble(0, fiboName, OBJPROP_PRICE, 0, g_fiboLow);
+      ObjectSetDouble(0, fiboName, OBJPROP_PRICE, 1, g_fiboHigh);
+   }
+   else
+   {
+      ObjectCreate(0, fiboName, OBJ_FIBO, 0, t0, p0, t1, p1);
+      ObjectSetDouble(0, fiboName, OBJPROP_PRICE, 0, g_fiboHigh);
+      ObjectSetDouble(0, fiboName, OBJPROP_PRICE, 1, g_fiboLow);
+   }
+
+   ObjectSetInteger(0, fiboName, OBJPROP_RAY_LEFT, false);
+   ObjectSetInteger(0, fiboName, OBJPROP_RAY_RIGHT, InpFiboRayRight);
+   ApplyFiboObjectStyle(fiboName);
+   SetupFiboObjectLevels(fiboName);
 
    g_fiboActive = true;
    UpdateFiboTradeButtons();
    CreateFiboAnchorLines();
 
-   Print("Scan Fibo Candle shift=", shift,
+   Print("Fibo dari ZZ seg ", lnName,
          " ", (g_fiboBullish ? "bullish" : "bearish"),
          " time=", TimeToString(g_fiboTime),
          " high=", DoubleToString(g_fiboHigh, _Digits),
@@ -1365,9 +1572,90 @@ void ScanFiboCandle(const int shiftParam)
    ChartRedraw();
 }
 
+bool FindZzSegmentAtClick(const int x, const int y, string &outSegName)
+{
+   int wnd = 0;
+   datetime t = 0;
+   double price = 0.0;
+   if(!ChartXYToTimePrice(0, x, y, wnd, t, price) || wnd != 0 || t <= 0)
+      return false;
+
+   string bestSeg = "";
+   double bestScore = DBL_MAX;
+   int total = ObjectsTotal(0, 0, -1);
+
+   for(int i = 0; i < total; i++)
+   {
+      string name = ObjectName(0, i, 0, -1);
+      if(StringFind(name, ZZSEG_PREFIX + "BX_") != 0)
+         continue;
+
+      datetime t0 = (datetime)ObjectGetInteger(0, name, OBJPROP_TIME, 0);
+      datetime t1 = (datetime)ObjectGetInteger(0, name, OBJPROP_TIME, 1);
+      double p0 = ObjectGetDouble(0, name, OBJPROP_PRICE, 0);
+      double p1 = ObjectGetDouble(0, name, OBJPROP_PRICE, 1);
+
+      datetime tMin = (datetime)MathMin((long)t0, (long)t1);
+      datetime tMax = (datetime)MathMax((long)t0, (long)t1);
+      double pMin = MathMin(p0, p1);
+      double pMax = MathMax(p0, p1);
+
+      bool inside = (t >= tMin && t <= tMax && price >= pMin && price <= pMax);
+      double midP = (pMin + pMax) * 0.5;
+      long midT = ((long)tMin + (long)tMax) / 2;
+      double score = MathAbs(price - midP) + MathAbs((double)((long)t - midT)) * _Point;
+
+      if(inside)
+         score *= 0.01;
+
+      if(score >= bestScore)
+         continue;
+
+      string idx = StringSubstr(name, StringLen(ZZSEG_PREFIX + "BX_"));
+      string boxName = ZZSEG_PREFIX + "BX_" + idx;
+      if(ObjectFind(0, boxName) < 0)
+         continue;
+
+      bestScore = score;
+      bestSeg = boxName;
+   }
+
+   if(bestSeg == "")
+   {
+      for(int i = 0; i < total; i++)
+      {
+         string name = ObjectName(0, i, 0, -1);
+         if(StringFind(name, ZZSEG_PREFIX + "LN_") != 0)
+            continue;
+
+         datetime t0 = (datetime)ObjectGetInteger(0, name, OBJPROP_TIME, 0);
+         datetime t1 = (datetime)ObjectGetInteger(0, name, OBJPROP_TIME, 1);
+         double p0 = ObjectGetDouble(0, name, OBJPROP_PRICE, 0);
+         double p1 = ObjectGetDouble(0, name, OBJPROP_PRICE, 1);
+         double midP = (p0 + p1) * 0.5;
+         long midT = ((long)t0 + (long)t1) / 2;
+         double score = MathAbs(price - midP) + MathAbs((double)((long)t - midT)) * _Point;
+
+         if(score < bestScore)
+         {
+            bestScore = score;
+            bestSeg = name;
+         }
+      }
+   }
+
+   if(bestSeg == "")
+      return false;
+
+   outSegName = bestSeg;
+   return true;
+}
+
 void SetPickFiboMode(const bool on)
 {
    g_pickFiboCandle = on;
+   if(on)
+      SetPickZzSegMode(false);
    if(ObjectFind(0, PREF+"BtnPickFibo") < 0)
       return;
    if(on)
@@ -1380,6 +1668,26 @@ void SetPickFiboMode(const bool on)
       ObjectSetString(0, PREF+"BtnPickFibo", OBJPROP_TEXT, "Pilih Candle");
       ObjectSetInteger(0, PREF+"BtnPickFibo", OBJPROP_BGCOLOR, clrDarkOrange);
    }
+}
+
+void SetPickZzSegMode(const bool on)
+{
+   g_pickZzSeg = on;
+   if(on)
+      SetPickFiboMode(false);
+   if(ObjectFind(0, PREF+"BtnPickZzSeg") < 0)
+      return;
+   if(on)
+   {
+      ObjectSetString(0, PREF+"BtnPickZzSeg", OBJPROP_TEXT, "Klik Segmen");
+      ObjectSetInteger(0, PREF+"BtnPickZzSeg", OBJPROP_BGCOLOR, clrOrangeRed);
+   }
+   else
+   {
+      ObjectSetString(0, PREF+"BtnPickZzSeg", OBJPROP_TEXT, "Pilih ZZ");
+      ObjectSetInteger(0, PREF+"BtnPickZzSeg", OBJPROP_BGCOLOR, clrMediumPurple);
+   }
+   ApplyZzSegPickStyle(on);
 }
 
 void PickFiboAtChart(const int x, const int y)
@@ -1407,6 +1715,23 @@ void PickFiboAtChart(const int x, const int y)
    ScanFiboCandle(shift);
    SetPickFiboMode(false);
    Print("Fibo dipasang di candle shift ", shift, " (", TimeToString(iTime(_Symbol, _Period, shift)), ")");
+}
+
+void PickZzSegAtChart(const int x, const int y)
+{
+   if(x >= 10 && x <= 10 + PANEL_W && y >= HEADER_Y && y <= UI_Y + PANEL_H)
+      return;
+
+   string zzSegName = "";
+   if(!FindZzSegmentAtClick(x, y, zzSegName))
+   {
+      Print("Pilih ZZ: klik di dalam kotak segmen ZigZag (hijau/merah).");
+      return;
+   }
+
+   ScanFiboFromZzSegment(zzSegName);
+   SetPickZzSegMode(false);
+   Print("Fibo dipasang dari segmen ", zzSegName);
 }
 
 void PlaceLimitOrder(const bool isBuy, const double entry, const double sl, const double tp, const string comment, const double lotMult)
@@ -1606,6 +1931,8 @@ void PlaceFiboBuyAll()
 
    DeleteFiboPending(true);
    DeleteFiboPending(false);
+   g_fiboCutProfitArmed = false;
+   g_fiboCutProfitArmBar = 0;
 
    Print("Buy L Fibo: order semua level 23.6 / 38.2 / 50 / 61.8 / 78.6");
    for(int lv = 1; lv <= 5; lv++)
@@ -1623,6 +1950,8 @@ void PlaceFiboSellAll()
 
    DeleteFiboPending(false);
    DeleteFiboPending(true);
+   g_fiboCutProfitArmed = false;
+   g_fiboCutProfitArmBar = 0;
 
    Print("Sell L Fibo: order semua level 23.6 / 38.2 / 50 / 61.8 / 78.6");
    for(int lv = 1; lv <= 5; lv++)
@@ -1706,6 +2035,8 @@ void CheckFiboCutLoss()
 
    if(closePx > level78)
    {
+      if(!HasFiboPositionSide(false))
+         return;
       Print("Cut loss SELL: close body ", DoubleToString(closePx, _Digits),
             " di atas garis ", DoubleToString(InpFiboLevel5, 1),
             " (", DoubleToString(level78, _Digits), ")");
@@ -1713,11 +2044,41 @@ void CheckFiboCutLoss()
    }
    else if(closePx < level78)
    {
+      if(!HasFiboPositionSide(true))
+         return;
       Print("Cut loss BUY: close body ", DoubleToString(closePx, _Digits),
             " di bawah garis ", DoubleToString(InpFiboLevel5, 1),
             " (", DoubleToString(level78, _Digits), ")");
       CutFiboTrades(true);
    }
+}
+
+bool HasFiboPositionSide(const bool isBuy)
+{
+   string tag = isBuy ? "FiboBuy" : "FiboSell";
+   long posType = isBuy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol)
+         continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber)
+         continue;
+      if(PositionGetInteger(POSITION_TYPE) != posType)
+         continue;
+
+      string cmt = PositionGetString(POSITION_COMMENT);
+      if(StringFind(cmt, tag) < 0)
+         continue;
+      if(g_fiboTime > 0 && (datetime)PositionGetInteger(POSITION_TIME) < g_fiboTime)
+         continue;
+      return true;
+   }
+
+   return false;
 }
 
 bool HasFibo786Position()
@@ -1736,6 +2097,8 @@ bool HasFibo786Position()
 
       string cmt = PositionGetString(POSITION_COMMENT);
       if(StringFind(cmt, "FiboBuy") < 0 && StringFind(cmt, "FiboSell") < 0)
+         continue;
+      if(g_fiboTime > 0 && (datetime)PositionGetInteger(POSITION_TIME) < g_fiboTime)
          continue;
       if(StringFind(cmt, lvl786) >= 0)
          return true;
@@ -1781,34 +2144,71 @@ bool Fibo786FilledOnLastBar()
    return false;
 }
 
+bool FiboPriceTouchesLevel(const double level)
+{
+   if(level <= 0.0)
+      return false;
+
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(bid <= 0.0 || ask <= 0.0)
+      return false;
+
+   return (bid <= level && ask >= level);
+}
+
+bool FiboCutProfitLevelReached()
+{
+   double level382 = FiboChartPrice(InpFiboLevel2);
+   double level786 = FiboChartPrice(InpFiboLevel5);
+   if(level382 <= 0.0 || level786 <= 0.0)
+      return false;
+
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(bid <= 0.0 || ask <= 0.0)
+      return false;
+
+   double tol = _Point * 2.0;
+
+   // 38.2 di atas 78.6: cut profit saat harga naik menyentuh 38.2
+   if(level382 > level786)
+      return (bid >= level382 - tol);
+
+   // 38.2 di bawah 78.6: cut profit saat harga turun menyentuh 38.2
+   return (ask <= level382 + tol);
+}
+
 void CheckFiboCutProfit()
 {
    if(!InpFiboCutProfit || !g_fiboActive)
       return;
 
-   // Aktif hanya setelah pending 78.6 benar-benar kebuka (posisi/deal fill)
    if(HasFibo786Position() || Fibo786FilledOnLastBar())
+   {
+      if(!g_fiboCutProfitArmed)
+         g_fiboCutProfitArmBar = iTime(_Symbol, _Period, 0);
       g_fiboCutProfitArmed = true;
+   }
 
    if(!g_fiboCutProfitArmed)
       return;
 
-   datetime closedTime = iTime(_Symbol, _Period, 1);
-   if(closedTime <= 0 || closedTime <= g_fiboTime)
+   // Bar fill 78.6: jangan cut profit di bar yang sama (hindari false trigger)
+   if(g_fiboCutProfitArmBar > 0 && iTime(_Symbol, _Period, 0) == g_fiboCutProfitArmBar)
+      return;
+
+   if(!FiboCutProfitLevelReached())
       return;
 
    double level382 = FiboChartPrice(InpFiboLevel2);
-   double high = iHigh(_Symbol, _Period, 1);
-   double low  = iLow(_Symbol, _Period, 1);
-   if(low > level382 || high < level382)
-      return;
-
    Print("Cut profit: pending 78.6 sudah kebuka, harga sentuh garis ",
          DoubleToString(InpFiboLevel2, 1), " (", DoubleToString(level382, _Digits),
          "). Tutup semua posisi/order EA.");
    CloseAllPositions();
    CloseAllOrders();
    g_fiboCutProfitArmed = false;
+   g_fiboCutProfitArmBar = 0;
 }
 
 void CutFiboTrades(const bool isBuy)
@@ -1926,7 +2326,7 @@ int GetInitialY(string name) {
       if(name == PREF+"LS_"+sL[i] || name == PREF+"Sell_"+sL[i]) return UI_Y + 130 + (i*30);
    }
    
-   if(name == PREF+"BtnScanFibo" || name == PREF+"BtnPickFibo") return UI_Y + 375;
+   if(name == PREF+"BtnScanFibo" || name == PREF+"BtnPickFibo" || name == PREF+"BtnPickZzSeg") return UI_Y + 375;
    if(name == PREF+"BtnBuyLFibo" || name == PREF+"BtnSellLFibo") return UI_Y + 415;
    if(name == PREF+"BtnBuyL" || name == PREF+"BtnSellL") return UI_Y + 455;
    if(name == PREF+"DelBuy" || name == PREF+"DelSell") return UI_Y + 495;
