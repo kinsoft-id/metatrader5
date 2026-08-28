@@ -27,7 +27,7 @@ input color  InpFiboColor       = clrDodgerBlue;
 input int    InpFiboWidth       = 2;
 input bool   InpFiboRayRight    = true;   // Ray ke kanan
 input bool   InpFiboCutLoss     = true;   // Cut loss: close body vs garis 78.6
-input bool   InpFiboCutProfit   = true;   // Cut profit: pending 78.6 kebuka, tutup di 38.2
+input bool   InpFiboCutProfit   = true;   // Cut profit: pending 78.6 kebuka, tutup saat melewati 50
 
 input group "--- ZIGZAG SEGMENT ---"
 input bool   InpLoadZigZagSeg   = true;              // Auto-load indikator ZigZag Segment
@@ -70,7 +70,7 @@ double g_lastRiskPct = 1.0;
 int UI_Y = 100;      
 int HEADER_Y = 50;   
 int PANEL_W = 500;   
-int PANEL_H = 750;   
+int PANEL_H = 790;   
 int UI_OFFSCREEN = -2000;
 
 bool     g_fiboActive = false;
@@ -83,6 +83,7 @@ double   g_fiboLow  = 0.0;
 datetime g_fiboTime = 0;
 bool     g_fiboCutProfitArmed = false;
 datetime g_fiboCutProfitArmBar = 0;
+bool     g_fiboLvOn[6];
 
 // --- Function Declarations ---
 void CreateDashboard();
@@ -135,6 +136,10 @@ void PlaceFiboBuyLimit(const int levelIdx);
 void PlaceFiboSellLimit(const int levelIdx);
 void PlaceFiboBuyAll();
 void PlaceFiboSellAll();
+void CreateFiboLevelToggles();
+void ApplyFiboLevelToggleStyle(const int lv);
+bool IsFiboLevelSelected(const int lv);
+void ToggleFiboLevel(const int lv);
 double FiboRatio(const double v);
 double FiboOppTarget();
 double FiboLevelNeg618();
@@ -186,6 +191,9 @@ int OnInit()
    ChartSetInteger(0, CHART_COLOR_FOREGROUND, clrBlack);
    ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, clrWhite);
    ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, clrBlack);
+   for(int lv = 1; lv <= 5; lv++)
+      g_fiboLvOn[lv] = true;
+
    CreateDashboard(); 
 
    if(IsFiboOnChart())
@@ -343,6 +351,11 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       }
       else if(sparam == PREF+"BtnBuyL") { PlaceBuyLimit(); ObjectSetInteger(0, PREF+"BtnBuyL", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BtnSellL") { PlaceSellLimit(); ObjectSetInteger(0, PREF+"BtnSellL", OBJPROP_STATE, false); }
+      else if(StringFind(sparam, PREF+"ChkFiboLv") == 0) {
+         int lv = (int)StringToInteger(StringSubstr(sparam, StringLen(PREF+"ChkFiboLv")));
+         ToggleFiboLevel(lv);
+         ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
+      }
       else if(sparam == PREF+"BtnBuyLFibo") { PlaceFiboBuyAll(); ObjectSetInteger(0, PREF+"BtnBuyLFibo", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BtnSellLFibo") { PlaceFiboSellAll(); ObjectSetInteger(0, PREF+"BtnSellLFibo", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BuyNow") { PlaceBuyNow(); ObjectSetInteger(0, PREF+"BuyNow", OBJPROP_STATE, false); }
@@ -1077,23 +1090,26 @@ void CreateDashboard() {
    CreateButton("BtnScanFibo", 20, UI_Y + 375, 150, 30, "Scan Fibo", clrTeal, clrWhite);
    CreateButton("BtnPickFibo", 175, UI_Y + 375, 150, 30, "Pilih Candle", clrDarkOrange, clrWhite);
    CreateButton("BtnPickZzSeg", 330, UI_Y + 375, 150, 30, "Pilih ZZ", clrMediumPurple, clrWhite);
-   CreateButton("BtnBuyLFibo", 20, UI_Y + 415, 200, 30, "Buy L Fibo", clrDodgerBlue, clrWhite);
-   CreateButton("BtnSellLFibo", 270, UI_Y + 415, 200, 30, "Sell L Fibo", clrOrangeRed, clrWhite);
-   CreateButton("BtnBuyL", 20, UI_Y + 455, 200, 30, "Buy Limit", clrBlue, clrWhite);
-   CreateButton("BtnSellL", 270, UI_Y + 455, 200, 30, "Sell Limit", clrOrange, clrWhite);
-   CreateButton("DelBuy", 20, UI_Y + 495, 200, 30, "Del Buy", clrBlue, clrWhite);
-   CreateButton("DelSell", 270, UI_Y + 495, 200, 30, "Del Sell", clrBrown, clrWhite);
-   CreateButton("ClosePos", 20, UI_Y + 535, PANEL_W-40, 30, "Close Positions", clrDarkRed, clrWhite);
-   CreateButton("CloseOrd", 20, UI_Y + 575, PANEL_W-40, 30, "Close All Orders", clrMaroon, clrWhite);
-   CreateButton("BuyNow", 20, UI_Y + 615, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
-   CreateButton("SellNow", 270, UI_Y + 615, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
-   CreateButton("GetNews", 20, UI_Y + 655, 200, 30, "Get News", clrGray, clrBlack);
-   CreateButton("Reset", 270, UI_Y + 655, 200, 30, "Reset", clrGray, clrBlack);
+   CreateFiboLevelToggles();
+   CreateButton("BtnBuyLFibo", 20, UI_Y + 453, 200, 30, "Buy L Fibo", clrDodgerBlue, clrWhite);
+   CreateButton("BtnSellLFibo", 270, UI_Y + 453, 200, 30, "Sell L Fibo", clrOrangeRed, clrWhite);
+   CreateButton("BtnBuyL", 20, UI_Y + 493, 200, 30, "Buy Limit", clrBlue, clrWhite);
+   CreateButton("BtnSellL", 270, UI_Y + 493, 200, 30, "Sell Limit", clrOrange, clrWhite);
+   CreateButton("DelBuy", 20, UI_Y + 533, 200, 30, "Del Buy", clrBlue, clrWhite);
+   CreateButton("DelSell", 270, UI_Y + 533, 200, 30, "Del Sell", clrBrown, clrWhite);
+   CreateButton("ClosePos", 20, UI_Y + 573, PANEL_W-40, 30, "Close Positions", clrDarkRed, clrWhite);
+   CreateButton("CloseOrd", 20, UI_Y + 613, PANEL_W-40, 30, "Close All Orders", clrMaroon, clrWhite);
+   CreateButton("BuyNow", 20, UI_Y + 653, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
+   CreateButton("SellNow", 270, UI_Y + 653, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
+   CreateButton("GetNews", 20, UI_Y + 693, 200, 30, "Get News", clrGray, clrBlack);
+   CreateButton("Reset", 270, UI_Y + 693, 200, 30, "Reset", clrGray, clrBlack);
    ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_ZORDER, 10);
 
    // Tambahkan ini di setiap fungsi pembuatan tombol/label dashboard Anda
    ObjectSetInteger(0, PREF+"BtnBuyLFibo", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"BtnSellLFibo", OBJPROP_ZORDER, 10);
+   for(int lv = 1; lv <= 5; lv++)
+      ObjectSetInteger(0, PREF+"ChkFiboLv"+IntegerToString(lv), OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"BtnBuyL", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"BtnSellL", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, "DelBuy", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
@@ -1934,9 +1950,20 @@ void PlaceFiboBuyAll()
    g_fiboCutProfitArmed = false;
    g_fiboCutProfitArmBar = 0;
 
-   Print("Buy L Fibo: order semua level 23.6 / 38.2 / 50 / 61.8 / 78.6");
+   int placed = 0;
+   string sel = "";
    for(int lv = 1; lv <= 5; lv++)
+   {
+      if(!IsFiboLevelSelected(lv))
+         continue;
       PlaceFiboBuyLimit(lv);
+      sel += (sel == "" ? "" : ", ") + DoubleToString(GetFiboLevelInput(lv), 1);
+      placed++;
+   }
+   if(placed == 0)
+      Print("Buy L Fibo: pilih minimal 1 level fibo di dashboard.");
+   else
+      Print("Buy L Fibo: order level ", sel);
 }
 
 void PlaceFiboSellAll()
@@ -1953,9 +1980,60 @@ void PlaceFiboSellAll()
    g_fiboCutProfitArmed = false;
    g_fiboCutProfitArmBar = 0;
 
-   Print("Sell L Fibo: order semua level 23.6 / 38.2 / 50 / 61.8 / 78.6");
+   int placed = 0;
+   string sel = "";
    for(int lv = 1; lv <= 5; lv++)
+   {
+      if(!IsFiboLevelSelected(lv))
+         continue;
       PlaceFiboSellLimit(lv);
+      sel += (sel == "" ? "" : ", ") + DoubleToString(GetFiboLevelInput(lv), 1);
+      placed++;
+   }
+   if(placed == 0)
+      Print("Sell L Fibo: pilih minimal 1 level fibo di dashboard.");
+   else
+      Print("Sell L Fibo: order level ", sel);
+}
+
+void CreateFiboLevelToggles()
+{
+   int xs[5] = {20, 112, 204, 296, 388};
+   for(int lv = 1; lv <= 5; lv++)
+   {
+      string name = "ChkFiboLv" + IntegerToString(lv);
+      CreateButton(name, xs[lv - 1], UI_Y + 412, 88, 28,
+                   DoubleToString(GetFiboLevelInput(lv), 1), clrTeal, clrWhite);
+      ApplyFiboLevelToggleStyle(lv);
+   }
+}
+
+void ApplyFiboLevelToggleStyle(const int lv)
+{
+   if(lv < 1 || lv > 5)
+      return;
+   string name = PREF + "ChkFiboLv" + IntegerToString(lv);
+   if(ObjectFind(0, name) < 0)
+      return;
+   bool on = g_fiboLvOn[lv];
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, on ? clrTeal : clrDimGray);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
+}
+
+bool IsFiboLevelSelected(const int lv)
+{
+   if(lv < 1 || lv > 5)
+      return false;
+   return g_fiboLvOn[lv];
+}
+
+void ToggleFiboLevel(const int lv)
+{
+   if(lv < 1 || lv > 5)
+      return;
+   g_fiboLvOn[lv] = !g_fiboLvOn[lv];
+   ApplyFiboLevelToggleStyle(lv);
+   ChartRedraw();
 }
 
 bool IsFiboOnChart()
@@ -2159,9 +2237,9 @@ bool FiboPriceTouchesLevel(const double level)
 
 bool FiboCutProfitLevelReached()
 {
-   double level382 = FiboChartPrice(InpFiboLevel2);
+   double level50  = FiboChartPrice(InpFiboLevel3);
    double level786 = FiboChartPrice(InpFiboLevel5);
-   if(level382 <= 0.0 || level786 <= 0.0)
+   if(level50 <= 0.0 || level786 <= 0.0)
       return false;
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -2169,14 +2247,12 @@ bool FiboCutProfitLevelReached()
    if(bid <= 0.0 || ask <= 0.0)
       return false;
 
-   double tol = _Point * 2.0;
+   // 50 di atas 78.6: cut profit saat harga naik melewati 50
+   if(level50 > level786)
+      return (bid > level50);
 
-   // 38.2 di atas 78.6: cut profit saat harga naik menyentuh 38.2
-   if(level382 > level786)
-      return (bid >= level382 - tol);
-
-   // 38.2 di bawah 78.6: cut profit saat harga turun menyentuh 38.2
-   return (ask <= level382 + tol);
+   // 50 di bawah 78.6: cut profit saat harga turun melewati 50
+   return (ask < level50);
 }
 
 void CheckFiboCutProfit()
@@ -2201,9 +2277,9 @@ void CheckFiboCutProfit()
    if(!FiboCutProfitLevelReached())
       return;
 
-   double level382 = FiboChartPrice(InpFiboLevel2);
-   Print("Cut profit: pending 78.6 sudah kebuka, harga sentuh garis ",
-         DoubleToString(InpFiboLevel2, 1), " (", DoubleToString(level382, _Digits),
+   double level50 = FiboChartPrice(InpFiboLevel3);
+   Print("Cut profit: pending 78.6 sudah kebuka, harga melewati garis ",
+         DoubleToString(InpFiboLevel3, 1), " (", DoubleToString(level50, _Digits),
          "). Tutup semua posisi/order EA.");
    CloseAllPositions();
    CloseAllOrders();
@@ -2327,12 +2403,13 @@ int GetInitialY(string name) {
    }
    
    if(name == PREF+"BtnScanFibo" || name == PREF+"BtnPickFibo" || name == PREF+"BtnPickZzSeg") return UI_Y + 375;
-   if(name == PREF+"BtnBuyLFibo" || name == PREF+"BtnSellLFibo") return UI_Y + 415;
-   if(name == PREF+"BtnBuyL" || name == PREF+"BtnSellL") return UI_Y + 455;
-   if(name == PREF+"DelBuy" || name == PREF+"DelSell") return UI_Y + 495;
-   if(name == PREF+"ClosePos") return UI_Y + 535;
-   if(name == PREF+"CloseOrd") return UI_Y + 575;
-   if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 615;
-   if(name == PREF+"Reset" || name == PREF+"GetNews") return UI_Y + 655;
+   if(StringFind(name, PREF+"ChkFiboLv") == 0) return UI_Y + 412;
+   if(name == PREF+"BtnBuyLFibo" || name == PREF+"BtnSellLFibo") return UI_Y + 453;
+   if(name == PREF+"BtnBuyL" || name == PREF+"BtnSellL") return UI_Y + 493;
+   if(name == PREF+"DelBuy" || name == PREF+"DelSell") return UI_Y + 533;
+   if(name == PREF+"ClosePos") return UI_Y + 573;
+   if(name == PREF+"CloseOrd") return UI_Y + 613;
+   if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 653;
+   if(name == PREF+"Reset" || name == PREF+"GetNews") return UI_Y + 693;
    return UI_Y;
 }
