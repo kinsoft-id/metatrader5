@@ -136,6 +136,7 @@ void PlaceFiboBuyLimit(const int levelIdx);
 void PlaceFiboSellLimit(const int levelIdx);
 void PlaceFiboBuyAll();
 void PlaceFiboSellAll();
+void PlaceFiboDirLimit(const int kind);
 void CreateFiboLevelToggles();
 void ApplyFiboLevelToggleStyle(const int lv);
 bool IsFiboLevelSelected(const int lv);
@@ -356,6 +357,8 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       }
       else if(sparam == PREF+"BtnBuyLFibo") { PlaceFiboBuyAll(); ObjectSetInteger(0, PREF+"BtnBuyLFibo", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BtnSellLFibo") { PlaceFiboSellAll(); ObjectSetInteger(0, PREF+"BtnSellLFibo", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnLim382") { PlaceFiboDirLimit(1); ObjectSetInteger(0, PREF+"BtnLim382", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnLim618") { PlaceFiboDirLimit(2); ObjectSetInteger(0, PREF+"BtnLim618", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BuyNow") { PlaceBuyNow(); ObjectSetInteger(0, PREF+"BuyNow", OBJPROP_STATE, false); }
       else if(sparam == PREF+"SellNow") { PlaceSellNow(); ObjectSetInteger(0, PREF+"SellNow", OBJPROP_STATE, false); }
       else if(sparam == PREF+"DelBuy") { DelPO(ORDER_TYPE_BUY_LIMIT); ObjectSetInteger(0, PREF+"DelBuy", OBJPROP_STATE, false); }
@@ -1093,8 +1096,10 @@ void CreateDashboard() {
    CreateButton("BtnSellL", 270, UI_Y + 493, 200, 30, "Sell Limit", clrOrange, clrWhite);
    CreateButton("DelBuy", 20, UI_Y + 533, 200, 30, "Del Buy", clrBlue, clrWhite);
    CreateButton("DelSell", 270, UI_Y + 533, 200, 30, "Del Sell", clrBrown, clrWhite);
-   CreateButton("ClosePos", 20, UI_Y + 573, PANEL_W-40, 30, "Close Positions", clrDarkRed, clrWhite);
-   CreateButton("CloseOrd", 20, UI_Y + 613, PANEL_W-40, 30, "Close All Orders", clrMaroon, clrWhite);
+   CreateButton("BtnLim382", 20, UI_Y + 573, 200, 30, "Limit 38.2", clrDodgerBlue, clrWhite);
+   CreateButton("BtnLim618", 270, UI_Y + 573, 200, 30, "Limit 61.8", clrOrangeRed, clrWhite);
+   CreateButton("ClosePos", 20, UI_Y + 613, 200, 30, "Close Positions", clrDarkRed, clrWhite);
+   CreateButton("CloseOrd", 270, UI_Y + 613, 200, 30, "Close Orders", clrMaroon, clrWhite);
    CreateButton("BuyNow", 20, UI_Y + 653, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
    CreateButton("SellNow", 270, UI_Y + 653, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
    CreateButton("GetNews", 20, UI_Y + 693, 200, 30, "Get News", clrGray, clrBlack);
@@ -1108,6 +1113,8 @@ void CreateDashboard() {
       ObjectSetInteger(0, PREF+"ChkFiboLv"+IntegerToString(lv), OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"BtnBuyL", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"BtnSellL", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, PREF+"BtnLim382", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, PREF+"BtnLim618", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, "DelBuy", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
    ObjectSetInteger(0, "DelSell", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
    ObjectSetInteger(0, "ClosePos", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
@@ -1964,6 +1971,43 @@ void PlaceFiboSellAll()
       Print("Sell L Fibo: order level ", sel);
 }
 
+void PlaceFiboDirLimit(const int kind)
+{
+   EnsureFiboScanned();
+   if(!g_fiboActive)
+   {
+      Print("Limit Fibo: scan / pilih fibo dulu.");
+      return;
+   }
+
+   double entryLv = 0.0;
+   double slLv    = 0.0;
+   double tpLv    = 0.0;
+   if(kind == 1)
+   {
+      entryLv = InpFiboLevel2;
+      slLv    = InpFiboLevel3;
+      tpLv    = 0.0;
+   }
+   else
+   {
+      entryLv = InpFiboLevel4;
+      slLv    = InpFiboLevel5;
+      tpLv    = InpFiboLevel1;
+   }
+
+   double entry = FiboChartPrice(entryLv);
+   double sl    = FiboChartPrice(slLv);
+   double tp    = FiboChartPrice(tpLv);
+   bool isBuy   = g_fiboBullish;
+   string tag   = isBuy ? "FiboBuy " : "FiboSell ";
+
+   Print("Limit ", DoubleToString(entryLv, 1),
+         isBuy ? " BUY" : " SELL",
+         " (arah fibo ", (g_fiboBullish ? "bullish" : "bearish"), ")");
+   PlaceLimitOrder(isBuy, entry, sl, tp, tag + DoubleToString(entryLv, 1));
+}
+
 void CreateFiboLevelToggles()
 {
    int xs[5] = {20, 112, 204, 296, 388};
@@ -2375,8 +2419,8 @@ int GetInitialY(string name) {
    if(name == PREF+"BtnBuyLFibo" || name == PREF+"BtnSellLFibo") return UI_Y + 453;
    if(name == PREF+"BtnBuyL" || name == PREF+"BtnSellL") return UI_Y + 493;
    if(name == PREF+"DelBuy" || name == PREF+"DelSell") return UI_Y + 533;
-   if(name == PREF+"ClosePos") return UI_Y + 573;
-   if(name == PREF+"CloseOrd") return UI_Y + 613;
+   if(name == PREF+"BtnLim382" || name == PREF+"BtnLim618") return UI_Y + 573;
+   if(name == PREF+"ClosePos" || name == PREF+"CloseOrd") return UI_Y + 613;
    if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 653;
    if(name == PREF+"Reset" || name == PREF+"GetNews") return UI_Y + 693;
    return UI_Y;
