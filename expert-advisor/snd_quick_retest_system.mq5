@@ -66,6 +66,8 @@ void PlaceBuyLimit();
 void PlaceSellLimit();
 void PlaceBuyNow();
 void PlaceSellNow();
+bool DrawingLinesActive();
+double GetDrawnLinePrice(string name);
 void GetHighImpactUSDNews();
 int  GetInitialY(string name);
 void CreateObject(string name, ENUM_OBJECT type, int win, int x, int y, int w, int h, color clr);
@@ -77,6 +79,7 @@ void CloseAllPositions();
 void CloseAllOrders();
 void ApplyQuoteVisibility();
 void DrawNativeLabel(string name, string text, int x, int y, color clr);
+void UpdateLiveClock();
 void ApplyLotModeUI();
 void CreateCalcLotLabel();
 void UpdateLotRiskDisplay(double bEntry, double bSL, double sEntry, double sSL);
@@ -119,16 +122,14 @@ int OnInit()
 
 void OnDeinit(const int reason) 
 { 
+   EventKillTimer();
    ObjectsDeleteAll(0, PREF); 
    ObjectsDeleteAll(0, ZONE_PREF); 
    ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrWhite);
 }
 
 void OnTick() { 
-   // CADANGAN: Jika OnTimer macet, jam akan tetap terupdate setiap kali ada tick harga baru
-   datetime serverTime = TimeCurrent();
-   string liveClock = TimeToString(serverTime, TIME_MINUTES | TIME_SECONDS);
-   DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
+   UpdateLiveClock();
    ApplyQuoteVisibility();
 
    static datetime lastBarTime = 0;
@@ -142,13 +143,44 @@ void OnTick() {
 // --- FUNGSI TIMER UNTUK MENYETEL WARNA MULTI EMA DARI EA ---
 void OnTimer()
 {
-   // Matikan timer agar fungsi ini hanya berjalan 1x saat start
-   EventKillTimer();
-   DrawNativeLabel(PREF + "Skor1", "Skor 1: PLN, Whitespace, Flip, Kiss/Quick Retest, Front Running", (PANEL_W + 20), 75, clrBlack);
-   DrawNativeLabel(PREF + "Skor2", "Skor 2: SR (Sering Respon), Profit Zone, Fibo, Curve/PAC, PPZ", (PANEL_W + 20), 100, clrBlack);
-   DrawNativeLabel(PREF + "Quote1", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 125, clrBlack);
-   DrawNativeLabel(PREF + "Quote2", "Jam Trading: 08-16 WIB, 20-22 WIB", (PANEL_W + 20), 150, clrBlack);
+   static bool quotesDrawn = false;
+   if(!quotesDrawn)
+   {
+      DrawNativeLabel(PREF + "Skor1", "Skor 1: PLN, Whitespace, Flip, Kiss/Quick Retest, Front Running", (PANEL_W + 20), 75, clrBlack);
+      DrawNativeLabel(PREF + "Skor2", "Skor 2: SR (Sering Respon), Profit Zone, Fibo, Curve/PAC, PPZ", (PANEL_W + 20), 100, clrBlack);
+      DrawNativeLabel(PREF + "Quote1", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 125, clrBlack);
+      DrawNativeLabel(PREF + "Quote2", "Jam Trading: 08-16 WIB, 20-22 WIB", (PANEL_W + 20), 150, clrBlack);
+      quotesDrawn = true;
+   }
+   UpdateLiveClock();
    ChartRedraw();
+}
+
+void UpdateLiveClock()
+{
+   datetime wib = TimeGMT() + 7 * 3600;
+   string wibClock = TimeToString(wib, TIME_MINUTES | TIME_SECONDS);
+
+   datetime barTime = iTime(_Symbol, _Period, 0);
+   int periodSec = PeriodSeconds(_Period);
+   int remain = 0;
+   if(barTime > 0 && periodSec > 0)
+   {
+      remain = (int)((barTime + periodSec) - TimeCurrent());
+      if(remain < 0)
+         remain = 0;
+   }
+
+   int hh = remain / 3600;
+   int mm = (remain % 3600) / 60;
+   int ss = remain % 60;
+   string cd = (hh > 0)
+      ? StringFormat("%d:%02d:%02d", hh, mm, ss)
+      : StringFormat("%02d:%02d", mm, ss);
+
+   string txt = "WIB " + wibClock + "   Candle close in " + cd;
+   color clr = (remain <= 10) ? clrOrangeRed : clrBlack;
+   DrawNativeLabel(PREF + "Live_Clock", txt, (PANEL_W + 20), 50, clr);
 }
 
 //+------------------------------------------------------------------+
@@ -753,34 +785,75 @@ void PlaceSellLimit() {
    } 
 }
 
-void PlaceBuyNow() { 
-   double sl = GetInputValue("Buy_Stoploss");
+bool DrawingLinesActive()
+{
+   return (ObjectFind(0, PREF+"Line_Floor") >= 0 && ObjectFind(0, PREF+"Line_Ceiling") >= 0);
+}
+
+double GetDrawnLinePrice(string name)
+{
+   if(ObjectFind(0, name) < 0) return 0.0;
+   return ObjectGetDouble(0, name, OBJPROP_PRICE);
+}
+
+void PlaceBuyNow() {
+   if(!DrawingLinesActive()) {
+      Print("Buy Now: drawing line belum aktif. Klik Draw Line dulu.");
+      return;
+   }
+
+   CalculateAndDrawAll();
+
    double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double sl = GetInputValue("Buy_Stoploss");
+   double tp = GetDrawnLinePrice(PREF+"Calc_B_TP5");
+
+   if(sl <= 0.0 || sl >= entry || tp <= entry) {
+      Print("Buy Now: butuh SL < Entry < TP5. SL=", sl, " Entry=", entry, " TP=", tp);
+      return;
+   }
+
    double lot = GetResolvedLot(ORDER_TYPE_BUY, entry, sl);
-   double tp5 = BuyTPByLayer(4, entry, sl);
-   
    if(lot <= 0) {
       Print("Lot size is zero or negative, cannot execute Buy trade.");
       return;
    }
-   if(trade.Buy(lot, _Symbol, 0, sl, tp5, "BuyNow"))
-      Print("Buy order executed: Lot=", lot, ", SL=", sl, ", TP=", tp5);
+
+   sl = NormalizeDouble(sl, _Digits);
+   tp = NormalizeDouble(tp, _Digits);
+   if(trade.Buy(lot, _Symbol, 0, sl, tp, "BuyNow"))
+      Print("Buy Now: Lot=", lot, ", SL=", sl, ", TP5=", tp);
    else
       Print("Failed to execute Buy order. Error: ", GetLastError());
 }
 
-void PlaceSellNow() { 
-   double sl = GetInputValue("Sell_Stoploss");
+void PlaceSellNow() {
+   if(!DrawingLinesActive()) {
+      Print("Sell Now: drawing line belum aktif. Klik Draw Line dulu.");
+      return;
+   }
+
+   CalculateAndDrawAll();
+
    double entry = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double sl = GetInputValue("Sell_Stoploss");
+   double tp = GetDrawnLinePrice(PREF+"Calc_S_TP5");
+
+   if(sl <= entry || tp >= entry || tp <= 0.0) {
+      Print("Sell Now: butuh TP5 < Entry < SL. SL=", sl, " Entry=", entry, " TP=", tp);
+      return;
+   }
+
    double lot = GetResolvedLot(ORDER_TYPE_SELL, entry, sl);
-   double tp5 = SellTPByLayer(4, entry, sl);
-   
    if(lot <= 0) {
       Print("Lot size is zero or negative, cannot execute Sell trade.");
       return;
    }
-   if(trade.Sell(lot, _Symbol, 0, sl, tp5, "SellNow"))
-      Print("Sell order executed: Lot=", lot, ", SL=", sl, ", TP=", tp5);
+
+   sl = NormalizeDouble(sl, _Digits);
+   tp = NormalizeDouble(tp, _Digits);
+   if(trade.Sell(lot, _Symbol, 0, sl, tp, "SellNow"))
+      Print("Sell Now: Lot=", lot, ", SL=", sl, ", TP5=", tp);
    else
       Print("Failed to execute Sell order. Error: ", GetLastError());
 }

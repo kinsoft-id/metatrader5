@@ -110,6 +110,7 @@ void CloseAllPositions();
 void CloseAllOrders();
 void ApplyQuoteVisibility();
 void DrawNativeLabel(string name, string text, int x, int y, color clr);
+void UpdateLiveClock();
 void ApplyLotModeUI();
 void CreateCalcLotLabel();
 void UpdateLotRiskDisplay(double bEntry, double bSL, double sEntry, double sSL);
@@ -220,6 +221,7 @@ int OnInit()
 
 void OnDeinit(const int reason) 
 { 
+   EventKillTimer();
    ObjectsDeleteAll(0, PREF); 
    ObjectsDeleteAll(0, ZONE_PREF); 
    RemoveZigZagSegmentFromChart();
@@ -227,10 +229,7 @@ void OnDeinit(const int reason)
 }
 
 void OnTick() { 
-   // CADANGAN: Jika OnTimer macet, jam akan tetap terupdate setiap kali ada tick harga baru
-   datetime serverTime = TimeCurrent();
-   string liveClock = TimeToString(serverTime, TIME_MINUTES | TIME_SECONDS);
-   DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
+   UpdateLiveClock();
    ApplyQuoteVisibility();
    CheckFiboCutProfit();
 
@@ -246,13 +245,44 @@ void OnTick() {
 // --- FUNGSI TIMER UNTUK MENYETEL WARNA MULTI EMA DARI EA ---
 void OnTimer()
 {
-   // Matikan timer agar fungsi ini hanya berjalan 1x saat start
-   EventKillTimer();
-   DrawNativeLabel(PREF + "Skor1", "Skor 1: PLN, Whitespace, Flip, Kiss/Quick Retest, Front Running", (PANEL_W + 20), 75, clrBlack);
-   DrawNativeLabel(PREF + "Skor2", "Skor 2: SR (Sering Respon), Profit Zone, Fibo, Curve/PAC, PPZ", (PANEL_W + 20), 100, clrBlack);
-   DrawNativeLabel(PREF + "Quote1", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 125, clrBlack);
-   DrawNativeLabel(PREF + "Quote2", "Jam Trading: 08-16 WIB, 20-22 WIB", (PANEL_W + 20), 150, clrBlack);
+   static bool quotesDrawn = false;
+   if(!quotesDrawn)
+   {
+      DrawNativeLabel(PREF + "Skor1", "Skor 1: PLN, Whitespace, Flip, Kiss/Quick Retest, Front Running", (PANEL_W + 20), 75, clrBlack);
+      DrawNativeLabel(PREF + "Skor2", "Skor 2: SR (Sering Respon), Profit Zone, Fibo, Curve/PAC, PPZ", (PANEL_W + 20), 100, clrBlack);
+      DrawNativeLabel(PREF + "Quote1", "Re-Entry di Area yang sama Maksimal 3x Pantulan", (PANEL_W + 20), 125, clrBlack);
+      DrawNativeLabel(PREF + "Quote2", "Jam Trading: 08-16 WIB, 20-22 WIB", (PANEL_W + 20), 150, clrBlack);
+      quotesDrawn = true;
+   }
+   UpdateLiveClock();
    ChartRedraw();
+}
+
+void UpdateLiveClock()
+{
+   datetime wib = TimeGMT() + 7 * 3600;
+   string wibClock = TimeToString(wib, TIME_MINUTES | TIME_SECONDS);
+
+   datetime barTime = iTime(_Symbol, _Period, 0);
+   int periodSec = PeriodSeconds(_Period);
+   int remain = 0;
+   if(barTime > 0 && periodSec > 0)
+   {
+      remain = (int)((barTime + periodSec) - TimeCurrent());
+      if(remain < 0)
+         remain = 0;
+   }
+
+   int hh = remain / 3600;
+   int mm = (remain % 3600) / 60;
+   int ss = remain % 60;
+   string cd = (hh > 0)
+      ? StringFormat("%d:%02d:%02d", hh, mm, ss)
+      : StringFormat("%02d:%02d", mm, ss);
+
+   string txt = "WIB " + wibClock + "   Candle close in " + cd;
+   color clr = (remain <= 10) ? clrOrangeRed : clrBlack;
+   DrawNativeLabel(PREF + "Live_Clock", txt, (PANEL_W + 20), 50, clr);
 }
 
 //+------------------------------------------------------------------+
