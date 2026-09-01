@@ -8,7 +8,7 @@
 //--- Input Parameters
 input double InpBasingRatio    = 0.618; // Rasio maksimal body candle untuk Base
 input double InpImpulsiveRatio = 0.55; // Rasio minimal body candle untuk Leg In/Out
-input int    InpMaxBase     = 13;    // Maksimal candle base berurutan
+input int    InpMaxBase     = 5;    // Maksimal candle base berurutan
 input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally
 input bool   InpShowDBD     = true;  // Tampilkan Drop Base Drop
 input bool   InpShowDBR     = false;  // Tampilkan Drop Base Rally
@@ -62,11 +62,12 @@ bool IsBasing(int index);
 void UpdateLine(string name, double price, color clr);
 void UpdateInput(string name, double price);
 double GetInputValue(string name);
-void PlaceBuyLimit();
-void PlaceSellLimit();
+void PlaceBuyOrder();
+void PlaceSellOrder();
 void PlaceBuyNow();
 void PlaceSellNow();
 bool DrawingLinesActive();
+bool PriceInDrawArea(double price);
 double GetDrawnLinePrice(string name);
 void GetHighImpactUSDNews();
 int  GetInitialY(string name);
@@ -240,12 +241,20 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          else { ObjectsDeleteAll(0, ZONE_PREF); ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "Scan S&D"); ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrDarkGreen); }
          ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_STATE, false); 
       }
-      else if(sparam == PREF+"BtnBuyL") { PlaceBuyLimit(); ObjectSetInteger(0, PREF+"BtnBuyL", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"BtnSellL") { PlaceSellLimit(); ObjectSetInteger(0, PREF+"BtnSellL", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnBuyL") { PlaceBuyOrder(); ObjectSetInteger(0, PREF+"BtnBuyL", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnSellL") { PlaceSellOrder(); ObjectSetInteger(0, PREF+"BtnSellL", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BuyNow") { PlaceBuyNow(); ObjectSetInteger(0, PREF+"BuyNow", OBJPROP_STATE, false); }
       else if(sparam == PREF+"SellNow") { PlaceSellNow(); ObjectSetInteger(0, PREF+"SellNow", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"DelBuy") { DelPO(ORDER_TYPE_BUY_LIMIT); ObjectSetInteger(0, PREF+"DelBuy", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"DelSell") { DelPO(ORDER_TYPE_SELL_LIMIT); ObjectSetInteger(0, PREF+"DelSell", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"DelBuy") {
+         DelPO(ORDER_TYPE_BUY_LIMIT);
+         DelPO(ORDER_TYPE_BUY_STOP);
+         ObjectSetInteger(0, PREF+"DelBuy", OBJPROP_STATE, false);
+      }
+      else if(sparam == PREF+"DelSell") {
+         DelPO(ORDER_TYPE_SELL_LIMIT);
+         DelPO(ORDER_TYPE_SELL_STOP);
+         ObjectSetInteger(0, PREF+"DelSell", OBJPROP_STATE, false);
+      }
       else if(sparam == PREF+"ClosePos") { CloseAllPositions(); ObjectSetInteger(0, PREF+"ClosePos", OBJPROP_STATE, false); }
       else if(sparam == PREF+"CloseOrd") { CloseAllOrders(); ObjectSetInteger(0, PREF+"CloseOrd", OBJPROP_STATE, false); }
       else if(sparam == PREF+"GetNews") { GetHighImpactUSDNews(); ObjectSetInteger(0, PREF+"GetNews", OBJPROP_STATE, false); }
@@ -751,38 +760,112 @@ void UpdateLotRiskDisplay(double bEntry, double bSL, double sEntry, double sSL)
    ObjectSetString(0, name, OBJPROP_TEXT, calcText);
 }
 
-void PlaceBuyLimit() { 
-   int layers = (int)GetInputValue("InpLayers"); 
-   if(layers < 1) layers = 1;
-   double proximal = GetInputValue("Buy_Entry"); 
-   double sl = GetInputValue("Buy_Stoploss"); 
-   // Semua layer entry di harga yang sama; SL satu; TP dinamis per layer
-   double entry = NormalizeDouble(proximal + GetSpreadPrice() * 2.0, _Digits);
-   double lot = GetResolvedLot(ORDER_TYPE_BUY, entry, sl);
-
-   if(proximal == 0 || lot == 0) return; 
-   Print("Buy Limit: ", layers, " layer x ", DoubleToString(lot, 2), " lot", IsAutoLot ? " (auto risk)" : " (manual)");
-   for(int i=0; i<layers; i++) { 
-      double tp = BuyTPByLayer(i, entry, sl);
-      trade.BuyLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Buy L"+IntegerToString(i+1)); 
-   } 
+bool PriceInDrawArea(double price)
+{
+   if(!DrawingLinesActive()) return false;
+   double pFloor = ObjectGetDouble(0, PREF+"Line_Floor", OBJPROP_PRICE);
+   double pCeiling = ObjectGetDouble(0, PREF+"Line_Ceiling", OBJPROP_PRICE);
+   double lo = MathMin(pFloor, pCeiling);
+   double hi = MathMax(pFloor, pCeiling);
+   return (price >= lo && price <= hi);
 }
 
-void PlaceSellLimit() { 
-   int layers = (int)GetInputValue("InpLayers"); 
+void PlaceBuyOrder() {
+   if(!DrawingLinesActive()) {
+      Print("Buy Order: drawing line belum aktif. Klik Draw Line dulu.");
+      return;
+   }
+   CalculateAndDrawAll();
+
+   int layers = (int)GetInputValue("InpLayers");
    if(layers < 1) layers = 1;
-   double proximal = GetInputValue("Sell_Entry"); 
-   double sl = GetInputValue("Sell_Stoploss"); 
-   // Semua layer entry di harga yang sama; SL satu; TP dinamis per layer
+   double proximal = GetInputValue("Buy_Entry");
+   double sl = GetInputValue("Buy_Stoploss");
+   double entry = NormalizeDouble(proximal + GetSpreadPrice() * 2.0, _Digits);
+   double lot = GetResolvedLot(ORDER_TYPE_BUY, entry, sl);
+   if(proximal == 0.0 || lot == 0.0) return;
+
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   bool inArea = PriceInDrawArea(ask);
+   bool useStop = inArea;
+
+   if(entry == ask) {
+      Print("Buy Order: entry sama dengan Ask, tidak bisa pending. Pakai Buy Now.");
+      return;
+   }
+   if(useStop && entry < ask) {
+      Print("Buy Order: di dalam area tapi entry < Ask, memakai Limit.");
+      useStop = false;
+   }
+   if(!useStop && entry > ask) {
+      Print("Buy Order: di luar area tapi entry > Ask, memakai Stop.");
+      useStop = true;
+   }
+
+   sl = NormalizeDouble(sl, _Digits);
+   string kind = useStop ? "Stop" : "Limit";
+   Print("Buy ", kind, ": ", layers, " layer x ", DoubleToString(lot, 2), " lot",
+         IsAutoLot ? " (auto risk)" : " (manual)",
+         inArea ? " [in area]" : " [out area]");
+
+   for(int i = 0; i < layers; i++) {
+      double tp = NormalizeDouble(BuyTPByLayer(i, entry, sl), _Digits);
+      string cmt = "Buy " + kind + " L" + IntegerToString(i + 1);
+      bool ok = useStop
+         ? trade.BuyStop(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, cmt)
+         : trade.BuyLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, cmt);
+      if(!ok)
+         Print("Buy ", kind, " layer ", i + 1, " gagal. Error: ", GetLastError());
+   }
+}
+
+void PlaceSellOrder() {
+   if(!DrawingLinesActive()) {
+      Print("Sell Order: drawing line belum aktif. Klik Draw Line dulu.");
+      return;
+   }
+   CalculateAndDrawAll();
+
+   int layers = (int)GetInputValue("InpLayers");
+   if(layers < 1) layers = 1;
+   double proximal = GetInputValue("Sell_Entry");
+   double sl = GetInputValue("Sell_Stoploss");
    double entry = NormalizeDouble(proximal - GetSpreadPrice() * 2.0, _Digits);
    double lot = GetResolvedLot(ORDER_TYPE_SELL, entry, sl);
+   if(proximal == 0.0 || lot == 0.0) return;
 
-   if(proximal == 0 || lot == 0) return; 
-   Print("Sell Limit: ", layers, " layer x ", DoubleToString(lot, 2), " lot", IsAutoLot ? " (auto risk)" : " (manual)");
-   for(int i=0; i<layers; i++) { 
-      double tp = SellTPByLayer(i, entry, sl);
-      trade.SellLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, "Sell L"+IntegerToString(i+1)); 
-   } 
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   bool inArea = PriceInDrawArea(bid);
+   bool useStop = inArea;
+
+   if(entry == bid) {
+      Print("Sell Order: entry sama dengan Bid, tidak bisa pending. Pakai Sell Now.");
+      return;
+   }
+   if(useStop && entry > bid) {
+      Print("Sell Order: di dalam area tapi entry > Bid, memakai Limit.");
+      useStop = false;
+   }
+   if(!useStop && entry < bid) {
+      Print("Sell Order: di luar area tapi entry < Bid, memakai Stop.");
+      useStop = true;
+   }
+
+   sl = NormalizeDouble(sl, _Digits);
+   string kind = useStop ? "Stop" : "Limit";
+   Print("Sell ", kind, ": ", layers, " layer x ", DoubleToString(lot, 2), " lot",
+         IsAutoLot ? " (auto risk)" : " (manual)",
+         inArea ? " [in area]" : " [out area]");
+
+   for(int i = 0; i < layers; i++) {
+      double tp = NormalizeDouble(SellTPByLayer(i, entry, sl), _Digits);
+      string cmt = "Sell " + kind + " L" + IntegerToString(i + 1);
+      bool ok = useStop
+         ? trade.SellStop(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, cmt)
+         : trade.SellLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, cmt);
+      if(!ok)
+         Print("Sell ", kind, " layer ", i + 1, " gagal. Error: ", GetLastError());
+   }
 }
 
 bool DrawingLinesActive()
@@ -939,8 +1022,8 @@ void CreateDashboard() {
       CreateLabel("LB_"+bL[i], 20, UI_Y+130+(i*30), bL[i], clrOrange); CreateEdit("Buy_"+bL[i], 130, UI_Y+134+(i*30), 110, 25, "0.00");
       CreateLabel("LS_"+sL[i], 270, UI_Y+130+(i*30), sL[i], clrOrange); CreateEdit("Sell_"+sL[i], 370, UI_Y+134+(i*30), 110, 25, "0.00");
    }
-   CreateButton("BtnBuyL", 20, UI_Y + 400, 200, 30, "Buy Limit", clrBlue, clrWhite);
-   CreateButton("BtnSellL", 270, UI_Y + 400, 200, 30, "Sell Limit", clrOrange, clrWhite);
+   CreateButton("BtnBuyL", 20, UI_Y + 400, 200, 30, "Buy Order", clrBlue, clrWhite);
+   CreateButton("BtnSellL", 270, UI_Y + 400, 200, 30, "Sell Order", clrOrange, clrWhite);
    CreateButton("DelBuy", 20, UI_Y + 440, 200, 30, "Del Buy", clrBlue, clrWhite);
    CreateButton("DelSell", 270, UI_Y + 440, 200, 30, "Del Sell", clrBrown, clrWhite);
    CreateButton("ClosePos", 20, UI_Y + 480, PANEL_W-40, 30, "Close Positions", clrDarkRed, clrWhite);

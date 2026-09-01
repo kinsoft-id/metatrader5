@@ -8,7 +8,7 @@
 //--- Input Parameters
 input double InpBasingRatio    = 0.618; // Rasio maksimal body candle untuk Base
 input double InpImpulsiveRatio = 0.55; // Rasio minimal body candle untuk Leg In/Out
-input int    InpMaxBase     = 13;    // Maksimal candle base berurutan
+input int    InpMaxBase     = 5;    // Maksimal candle base berurutan
 input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally
 input bool   InpShowDBD     = true;  // Tampilkan Drop Base Drop
 input bool   InpShowDBR     = false;  // Tampilkan Drop Base Rally
@@ -388,6 +388,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       else if(sparam == PREF+"BtnBuyLFibo") { PlaceFiboBuyAll(); ObjectSetInteger(0, PREF+"BtnBuyLFibo", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BtnSellLFibo") { PlaceFiboSellAll(); ObjectSetInteger(0, PREF+"BtnSellLFibo", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BtnLim382") { PlaceFiboDirLimit(1); ObjectSetInteger(0, PREF+"BtnLim382", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnLim50")  { PlaceFiboDirLimit(3); ObjectSetInteger(0, PREF+"BtnLim50", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BtnLim618") { PlaceFiboDirLimit(2); ObjectSetInteger(0, PREF+"BtnLim618", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BuyNow") { PlaceBuyNow(); ObjectSetInteger(0, PREF+"BuyNow", OBJPROP_STATE, false); }
       else if(sparam == PREF+"SellNow") { PlaceSellNow(); ObjectSetInteger(0, PREF+"SellNow", OBJPROP_STATE, false); }
@@ -1126,8 +1127,9 @@ void CreateDashboard() {
    CreateButton("BtnSellL", 270, UI_Y + 493, 200, 30, "Sell Limit", clrOrange, clrWhite);
    CreateButton("DelBuy", 20, UI_Y + 533, 200, 30, "Del Buy", clrBlue, clrWhite);
    CreateButton("DelSell", 270, UI_Y + 533, 200, 30, "Del Sell", clrBrown, clrWhite);
-   CreateButton("BtnLim382", 20, UI_Y + 573, 200, 30, "Limit 38.2", clrDodgerBlue, clrWhite);
-   CreateButton("BtnLim618", 270, UI_Y + 573, 200, 30, "Limit 61.8", clrOrangeRed, clrWhite);
+   CreateButton("BtnLim382", 20, UI_Y + 573, 150, 30, "Limit 38.2", clrDodgerBlue, clrWhite);
+   CreateButton("BtnLim50", 175, UI_Y + 573, 150, 30, "Limit 50", clrTeal, clrWhite);
+   CreateButton("BtnLim618", 330, UI_Y + 573, 150, 30, "Limit 61.8", clrOrangeRed, clrWhite);
    CreateButton("ClosePos", 20, UI_Y + 613, 200, 30, "Close Positions", clrDarkRed, clrWhite);
    CreateButton("CloseOrd", 270, UI_Y + 613, 200, 30, "Close Orders", clrMaroon, clrWhite);
    CreateButton("BuyNow", 20, UI_Y + 653, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
@@ -1144,6 +1146,7 @@ void CreateDashboard() {
    ObjectSetInteger(0, PREF+"BtnBuyL", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"BtnSellL", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"BtnLim382", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, PREF+"BtnLim50", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"BtnLim618", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, "DelBuy", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
    ObjectSetInteger(0, "DelSell", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
@@ -2019,6 +2022,12 @@ void PlaceFiboDirLimit(const int kind)
       slLv    = InpFiboLevel3;
       tpLv    = 0.0;
    }
+   else if(kind == 3)
+   {
+      entryLv = InpFiboLevel3;
+      slLv    = InpFiboLevel5;
+      tpLv    = 0.0;
+   }
    else
    {
       entryLv = InpFiboLevel4;
@@ -2449,7 +2458,7 @@ int GetInitialY(string name) {
    if(name == PREF+"BtnBuyLFibo" || name == PREF+"BtnSellLFibo") return UI_Y + 453;
    if(name == PREF+"BtnBuyL" || name == PREF+"BtnSellL") return UI_Y + 493;
    if(name == PREF+"DelBuy" || name == PREF+"DelSell") return UI_Y + 533;
-   if(name == PREF+"BtnLim382" || name == PREF+"BtnLim618") return UI_Y + 573;
+   if(name == PREF+"BtnLim382" || name == PREF+"BtnLim50" || name == PREF+"BtnLim618") return UI_Y + 573;
    if(name == PREF+"ClosePos" || name == PREF+"CloseOrd") return UI_Y + 613;
    if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 653;
    if(name == PREF+"Reset" || name == PREF+"GetNews") return UI_Y + 693;

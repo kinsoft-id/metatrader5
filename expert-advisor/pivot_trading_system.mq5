@@ -7,7 +7,7 @@
 
 //--- Input Parameters
 input double InpBasingRatio = 0.618; // Rasio maksimal body candle untuk dianggap Base
-input int    InpMaxBase     = 13;    // Maksimal candle base berurutan
+input int    InpMaxBase     = 5;    // Maksimal candle base berurutan
 input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally
 input bool   InpShowDBD     = true;  // Tampilkan Drop Base Drop
 input bool   InpShowDBR     = false;  // Tampilkan Drop Base Rally
