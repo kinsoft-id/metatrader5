@@ -1,14 +1,16 @@
 #property copyright "Converted from Breaker Blocks with Signals [LuxAlgo] — CC BY-NC-SA 4.0"
 #property link      "https://creativecommons.org/licenses/by-nc-sa/4.0/"
-#property version   "1.00"
+#property version   "1.10"
 #property indicator_chart_window
 #property indicator_plots   0
-#property indicator_buffers 8
+#property indicator_buffers 19
 
 //+------------------------------------------------------------------+
 //| Buffers (iCustom shift 0 = bar terakhir)                         |
 //| 0 +BB  1 signal UP  2 cancel UP  3 +BB mitigated                 |
 //| 4 -BB  5 signal DN  6 cancel DN  7 -BB mitigated                 |
+//| 8 zzHigh  9 zzLow  10 dir  11 top  12 bot  13 mid                |
+//| 14 sw1  15 sw2  16 tp1  17 tp2  18 tp3                           |
 //+------------------------------------------------------------------+
 double g_bufBBPlus[];
 double g_bufSignUP[];
@@ -18,11 +20,22 @@ double g_bufBBMinus[];
 double g_bufSignDN[];
 double g_bufCnclDN[];
 double g_bufEndBr[];
+double g_zzHigh[];
+double g_zzLow[];
+double g_bufDir[];
+double g_bufTop[];
+double g_bufBot[];
+double g_bufMid[];
+double g_bufSw1[];
+double g_bufSw2[];
+double g_bufTp1[];
+double g_bufTp2[];
+double g_bufTp3[];
 
 input group "Market Structure"
 input int    InpLength               = 5;       // Length (pivot kiri)
 input int    InpLookback             = 2000;    // Max bars
-input bool   InpShowZZ               = false;   // Tampilkan ZigZag
+input bool   InpShowZZ               = true;   // Tampilkan ZigZag
 
 input group "Breaker Block"
 input bool   InpOnlyBody             = false;   // Use only candle body
@@ -38,7 +51,7 @@ input color  InpPDtxtColor           = clrSilver; // Text Color
 input color  InpPDSwingColor         = clrSilver; // Swing Line Color
 
 input group "TP"
-input bool   InpEnableTP             = false;   // Enable TP
+input bool   InpEnableTP             = true;   // Enable TP
 input color  InpTPColor              = C'33,87,243';
 input double InpR1a                  = 1.0;     // R:R 1
 input double InpR2a                  = 2.0;
@@ -72,6 +85,17 @@ input bool   InpAlerts               = false;   // Enable Alert()
 #define BUF_SIGNDN  5
 #define BUF_CNCLDN  6
 #define BUF_ENDBR   7
+#define BUF_ZZHI    8
+#define BUF_ZZLO    9
+#define BUF_DIR     10
+#define BUF_TOP     11
+#define BUF_BOT     12
+#define BUF_MID     13
+#define BUF_SW1     14
+#define BUF_SW2     15
+#define BUF_TP1     16
+#define BUF_TP2     17
+#define BUF_TP3     18
 
 #define LAB_UP      0
 #define LAB_DN      1
@@ -1095,11 +1119,13 @@ void DrawZigZag()
       {
          if(g_zz[i].time <= 0 || g_zz[i + 1].time <= 0)
             continue;
-         const color col = (g_zz[i].dir == 1) ? InpBBPlusB : InpBBMinusB;
+         const color col = (g_zz[i].dir == 1) ? clrDodgerBlue : clrDarkOrange;
          EnsureTrend(PREFIX + "ZZ_" + IntegerToString(drawn),
                      g_zz[i + 1].time, g_zz[i + 1].price,
                      g_zz[i].time, g_zz[i].price,
-                     col, STYLE_SOLID, 1);
+                     col, STYLE_SOLID, 2);
+         ObjectSetInteger(0, PREFIX + "ZZ_" + IntegerToString(drawn), OBJPROP_BACK, false);
+         ObjectSetInteger(0, PREFIX + "ZZ_" + IntegerToString(drawn), OBJPROP_WIDTH, 2);
          drawn++;
       }
    }
@@ -1253,6 +1279,54 @@ void ResetState()
    }
 }
 
+void FillExportBuffers(const int rates_total)
+{
+   ArrayInitialize(g_zzHigh, EMPTY_VALUE);
+   ArrayInitialize(g_zzLow,  EMPTY_VALUE);
+   ArrayInitialize(g_bufDir, 0.0);
+   ArrayInitialize(g_bufTop, 0.0);
+   ArrayInitialize(g_bufBot, 0.0);
+   ArrayInitialize(g_bufMid, 0.0);
+   ArrayInitialize(g_bufSw1, 0.0);
+   ArrayInitialize(g_bufSw2, 0.0);
+   ArrayInitialize(g_bufTp1, 0.0);
+   ArrayInitialize(g_bufTp2, 0.0);
+   ArrayInitialize(g_bufTp3, 0.0);
+
+   for(int i = 0; i < g_zzCount; i++)
+   {
+      const int idx = g_zz[i].idx;
+      if(idx < 0 || idx >= rates_total)
+         continue;
+      if(g_zz[i].dir == 1)
+         g_zzHigh[idx] = g_zz[i].price;
+      else if(g_zz[i].dir == -1)
+         g_zzLow[idx] = g_zz[i].price;
+   }
+
+   if(g_bb.dir == 0)
+      return;
+
+   int from = g_bb.createdIdx;
+   if(from < 0)
+      from = 0;
+   if(from >= rates_total)
+      from = rates_total - 1;
+
+   for(int n = from; n < rates_total; n++)
+   {
+      g_bufDir[n] = (double)g_bb.dir;
+      g_bufTop[n] = g_bb.top;
+      g_bufBot[n] = g_bb.bottom;
+      g_bufMid[n] = g_bb.avg;
+      g_bufSw1[n] = g_bb.sw1_y;
+      g_bufSw2[n] = g_bb.sw2_y;
+      g_bufTp1[n] = g_bb.tp1;
+      g_bufTp2[n] = g_bb.tp2;
+      g_bufTp3[n] = g_bb.tp3;
+   }
+}
+
 int OnInit()
 {
    SetIndexBuffer(0, g_bufBBPlus,  INDICATOR_DATA);
@@ -1278,6 +1352,30 @@ int OnInit()
 
    IndicatorSetString(INDICATOR_SHORTNAME, "Breaker Blocks with Signals");
    IndicatorSetInteger(INDICATOR_DIGITS, _Digits);
+
+   SetIndexBuffer(8,  g_zzHigh,    INDICATOR_DATA);
+   SetIndexBuffer(9,  g_zzLow,     INDICATOR_DATA);
+   SetIndexBuffer(10, g_bufDir,    INDICATOR_DATA);
+   SetIndexBuffer(11, g_bufTop,    INDICATOR_DATA);
+   SetIndexBuffer(12, g_bufBot,    INDICATOR_DATA);
+   SetIndexBuffer(13, g_bufMid,    INDICATOR_DATA);
+   SetIndexBuffer(14, g_bufSw1,    INDICATOR_DATA);
+   SetIndexBuffer(15, g_bufSw2,    INDICATOR_DATA);
+   SetIndexBuffer(16, g_bufTp1,    INDICATOR_DATA);
+   SetIndexBuffer(17, g_bufTp2,    INDICATOR_DATA);
+   SetIndexBuffer(18, g_bufTp3,    INDICATOR_DATA);
+
+   ArraySetAsSeries(g_zzHigh,  false);
+   ArraySetAsSeries(g_zzLow,   false);
+   ArraySetAsSeries(g_bufDir,  false);
+   ArraySetAsSeries(g_bufTop,  false);
+   ArraySetAsSeries(g_bufBot,  false);
+   ArraySetAsSeries(g_bufMid,  false);
+   ArraySetAsSeries(g_bufSw1,  false);
+   ArraySetAsSeries(g_bufSw2,  false);
+   ArraySetAsSeries(g_bufTp1,  false);
+   ArraySetAsSeries(g_bufTp2,  false);
+   ArraySetAsSeries(g_bufTp3,  false);
 
    g_drawnLabels = 0;
    g_drawnZZ     = 0;
@@ -1326,6 +1424,8 @@ int OnCalculate(const int rates_total,
       TryCreateMSS(n, rates_total, (n >= bbStart), time, open, high, low, close);
       UpdateActiveBB(n, rates_total, time, open, high, low, close);
    }
+
+   FillExportBuffers(rates_total);
 
    const datetime tNow = time[rates_total - 1];
    DrawBlock(tNow);

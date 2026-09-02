@@ -23,6 +23,7 @@ input bool  InpFibo382   = true;   // Show 38.2
 input bool  InpFibo50    = true;   // Show 50.0
 input bool  InpFibo618   = true;   // Show 61.8
 input bool  InpFibo786   = true;   // Show 78.6
+input bool  InpFibo886   = true;   // Show 88.6
 
 enum ENUM_HL_TF
 {
@@ -363,6 +364,7 @@ int FiboVisibleCount()
    if(InpFibo50)  n++;
    if(InpFibo618) n++;
    if(InpFibo786) n++;
+   if(InpFibo886) n++;
    return n;
 }
 
@@ -409,6 +411,7 @@ void EnsureFibo(const string name, const PivotPoint &from, const PivotPoint &to)
    if(InpFibo50)  ApplyFiboLevel(name, idx++, 0.500, "50.0");
    if(InpFibo618) ApplyFiboLevel(name, idx++, 0.618, "61.8");
    if(InpFibo786) ApplyFiboLevel(name, idx++, 0.786, "78.6");
+   if(InpFibo886) ApplyFiboLevel(name, idx++, 0.886, "88.6");
 }
 
 void EnsureBox(const string name, const PivotPoint &from, const PivotPoint &to)
