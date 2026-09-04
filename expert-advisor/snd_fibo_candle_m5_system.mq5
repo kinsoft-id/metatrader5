@@ -23,11 +23,12 @@ input double InpFiboLevel2      = 38.2;   // Level Fibo 2
 input double InpFiboLevel3      = 50.0;   // Level Fibo 3
 input double InpFiboLevel4      = 61.8;   // Level Fibo 4
 input double InpFiboLevel5      = 78.6;   // Level Fibo 5
+input double InpFiboLevel6      = 88.6;   // Level Fibo 6
 input color  InpFiboColor       = clrDodgerBlue;
 input int    InpFiboWidth       = 2;
 input bool   InpFiboRayRight    = true;   // Ray ke kanan
-input bool   InpFiboCutLoss     = true;   // Cut loss: close body vs garis 78.6
-input bool   InpFiboCutProfit   = true;   // Cut profit: pending 78.6 kebuka, tutup saat melewati 50
+input bool   InpFiboCutLoss     = true;   // Cut loss: close body vs garis 88.6
+input bool   InpFiboCutProfit   = true;   // Cut profit: wick 88.6, tutup saat melewati 50
 
 input group "--- ZIGZAG SEGMENT ---"
 input bool   InpLoadZigZagSeg   = true;              // Auto-load indikator ZigZag Segment
@@ -81,6 +82,7 @@ bool     g_fiboBullish = true;
 double   g_fiboHigh = 0.0;
 double   g_fiboLow  = 0.0;
 datetime g_fiboTime = 0;
+datetime g_fiboWickAfter = 0;
 bool     g_fiboCutProfitArmed = false;
 datetime g_fiboCutProfitArmBar = 0;
 bool     g_fiboLvOn[6];
@@ -161,12 +163,13 @@ void OnFiboAnchorDragged();
 void PlaceLimitOrder(const bool isBuy, const double entry, const double sl, const double tp, const string comment, const double lotMult=1.0);
 void CheckFiboCutLoss();
 void CheckFiboCutProfit();
+void ResetFiboCutProfit(const bool wickFromNow);
 bool FiboPriceTouchesLevel(const double level);
+bool FiboWickTouchesLevel(const double level, datetime &touchBar);
 bool FiboCutProfitLevelReached();
 void CutFiboTrades(const bool isBuy);
 bool HasFiboPositionSide(const bool isBuy);
-bool HasFibo786Position();
-bool Fibo786FilledOnLastBar();
+bool HasFiboDeepPosition();
 bool IsFiboOnChart();
 void EnsureFiboScanned();
 void DeleteFiboPending(const bool isBuy);
@@ -1227,6 +1230,7 @@ double GetFiboLevelInput(const int levelIdx)
    if(levelIdx == 3) return InpFiboLevel3;
    if(levelIdx == 4) return InpFiboLevel4;
    if(levelIdx == 5) return InpFiboLevel5;
+   if(levelIdx == 6) return InpFiboLevel6;
    return 0.0;
 }
 
@@ -1261,6 +1265,7 @@ void OnFiboObjectMoved(const string fiboName)
 {
    SyncFiboFromObject();
    SyncFiboAnchorLines();
+   ResetFiboCutProfit(true);
    UpdateFiboTradeButtons();
 }
 
@@ -1331,6 +1336,7 @@ void OnFiboAnchorDragged()
    g_fiboHigh = high;
    g_fiboLow  = low;
    g_fiboActive = true;
+   ResetFiboCutProfit(true);
    UpdateFiboObjectFromGlobals();
    UpdateFiboTradeButtons();
 }
@@ -1395,6 +1401,7 @@ void ClearFiboCandle()
    g_fiboHigh = 0.0;
    g_fiboLow  = 0.0;
    g_fiboTime = 0;
+   g_fiboWickAfter = 0;
    g_fiboCutProfitArmed = false;
    g_fiboCutProfitArmBar = 0;
 }
@@ -1447,6 +1454,7 @@ void ScanFiboCandle(const int shiftParam)
    SetupFiboObjectLevels(fiboName);
 
    g_fiboActive = true;
+   ResetFiboCutProfit(false);
    UpdateFiboTradeButtons();
    CreateFiboAnchorLines();
 
@@ -1463,10 +1471,10 @@ void SetupFiboObjectLevels(const string fiboName)
    ObjectSetInteger(0, fiboName, OBJPROP_COLOR, clrNONE);
    ObjectSetInteger(0, fiboName, OBJPROP_STYLE, STYLE_SOLID);
    ObjectSetInteger(0, fiboName, OBJPROP_WIDTH, 0);
-   ObjectSetInteger(0, fiboName, OBJPROP_LEVELS, 11);
+   ObjectSetInteger(0, fiboName, OBJPROP_LEVELS, 12);
 
-   double levelVals[11];
-   string levelTxt[11];
+   double levelVals[12];
+   string levelTxt[12];
    levelVals[0]  = 0.0;                            levelTxt[0]  = "0";
    levelVals[1]  = 1.0;                            levelTxt[1]  = "100";
    levelVals[2]  = FiboRatio(InpFiboLevel1);       levelTxt[2]  = DoubleToString(InpFiboLevel1, 1);
@@ -1474,12 +1482,13 @@ void SetupFiboObjectLevels(const string fiboName)
    levelVals[4]  = FiboRatio(InpFiboLevel3);       levelTxt[4]  = DoubleToString(InpFiboLevel3, 1);
    levelVals[5]  = FiboRatio(InpFiboLevel4);       levelTxt[5]  = DoubleToString(InpFiboLevel4, 1);
    levelVals[6]  = FiboRatio(InpFiboLevel5);       levelTxt[6]  = DoubleToString(InpFiboLevel5, 1);
-   levelVals[7]  = FiboRatio(InpFiboTarget);       levelTxt[7]  = DoubleToString(InpFiboTarget, 1);
-   levelVals[8]  = FiboRatio(FiboOppTarget());     levelTxt[8]  = DoubleToString(FiboOppTarget(), 3);
-   levelVals[9]  = FiboRatio(FiboLevelPos1618());  levelTxt[9]  = DoubleToString(FiboLevelPos1618(), 3);
-   levelVals[10] = FiboRatio(FiboLevelNeg618());   levelTxt[10] = DoubleToString(FiboLevelNeg618(), 1);
+   levelVals[7]  = FiboRatio(InpFiboLevel6);       levelTxt[7]  = DoubleToString(InpFiboLevel6, 1);
+   levelVals[8]  = FiboRatio(InpFiboTarget);       levelTxt[8]  = DoubleToString(InpFiboTarget, 1);
+   levelVals[9]  = FiboRatio(FiboOppTarget());     levelTxt[9]  = DoubleToString(FiboOppTarget(), 3);
+   levelVals[10] = FiboRatio(FiboLevelPos1618());  levelTxt[10] = DoubleToString(FiboLevelPos1618(), 3);
+   levelVals[11] = FiboRatio(FiboLevelNeg618());   levelTxt[11] = DoubleToString(FiboLevelNeg618(), 1);
 
-   for(int i = 0; i < 11; i++)
+   for(int i = 0; i < 12; i++)
    {
       ObjectSetDouble(0, fiboName, OBJPROP_LEVELVALUE, i, levelVals[i]);
       ObjectSetInteger(0, fiboName, OBJPROP_LEVELSTYLE, i, STYLE_DOT);
@@ -1617,6 +1626,7 @@ void ScanFiboFromZzSegment(const string zzSegName)
    SetupFiboObjectLevels(fiboName);
 
    g_fiboActive = true;
+   ResetFiboCutProfit(false);
    UpdateFiboTradeButtons();
    CreateFiboAnchorLines();
 
@@ -2192,24 +2202,24 @@ void CheckFiboCutLoss()
       return;
 
    double closePx = iClose(_Symbol, _Period, 1);
-   double level78 = FiboChartPrice(InpFiboLevel5);
+   double level886 = FiboChartPrice(InpFiboLevel6);
 
-   if(closePx > level78)
+   if(closePx > level886)
    {
       if(!HasFiboPositionSide(false))
          return;
       Print("Cut loss SELL: close body ", DoubleToString(closePx, _Digits),
-            " di atas garis ", DoubleToString(InpFiboLevel5, 1),
-            " (", DoubleToString(level78, _Digits), ")");
+            " di atas garis ", DoubleToString(InpFiboLevel6, 1),
+            " (", DoubleToString(level886, _Digits), ")");
       CutFiboTrades(false);
    }
-   else if(closePx < level78)
+   else if(closePx < level886)
    {
       if(!HasFiboPositionSide(true))
          return;
       Print("Cut loss BUY: close body ", DoubleToString(closePx, _Digits),
-            " di bawah garis ", DoubleToString(InpFiboLevel5, 1),
-            " (", DoubleToString(level78, _Digits), ")");
+            " di bawah garis ", DoubleToString(InpFiboLevel6, 1),
+            " (", DoubleToString(level886, _Digits), ")");
       CutFiboTrades(true);
    }
 }
@@ -2242,9 +2252,10 @@ bool HasFiboPositionSide(const bool isBuy)
    return false;
 }
 
-bool HasFibo786Position()
+bool HasFiboDeepPosition()
 {
-   string lvl786 = DoubleToString(InpFiboLevel5, 1);
+   string lv618 = DoubleToString(InpFiboLevel4, 1);
+   string lv786 = DoubleToString(InpFiboLevel5, 1);
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
@@ -2261,45 +2272,64 @@ bool HasFibo786Position()
          continue;
       if(g_fiboTime > 0 && (datetime)PositionGetInteger(POSITION_TIME) < g_fiboTime)
          continue;
-      if(StringFind(cmt, lvl786) >= 0)
+      if(StringFind(cmt, lv618) >= 0 || StringFind(cmt, lv786) >= 0)
          return true;
    }
 
    return false;
 }
 
-bool Fibo786FilledOnLastBar()
+void ResetFiboCutProfit(const bool wickFromNow)
 {
-   if(!g_fiboActive)
+   g_fiboCutProfitArmed = false;
+   g_fiboCutProfitArmBar = 0;
+   if(wickFromNow)
+      g_fiboWickAfter = iTime(_Symbol, _Period, 0);
+   else
+      g_fiboWickAfter = g_fiboTime;
+}
+
+bool FiboWickTouchesLevel(const double level, datetime &touchBar)
+{
+   touchBar = 0;
+   if(level <= 0.0 || g_fiboTime <= 0)
       return false;
 
-   datetime barTime = iTime(_Symbol, _Period, 1);
-   if(barTime <= 0 || barTime <= g_fiboTime)
-      return false;
+   datetime after = (g_fiboWickAfter > 0) ? g_fiboWickAfter : g_fiboTime;
 
-   datetime barEnd = barTime + (datetime)PeriodSeconds();
-   if(!HistorySelect(barTime, barEnd))
-      return false;
-
-   string lvl786 = DoubleToString(InpFiboLevel5, 1);
-   int total = HistoryDealsTotal();
-   for(int i = 0; i < total; i++)
+   int bars = Bars(_Symbol, _Period);
+   int maxShift = (int)MathMin((double)(bars - 1), 500.0);
+   for(int i = 0; i <= maxShift; i++)
    {
-      ulong deal = HistoryDealGetTicket(i);
-      if(deal == 0)
+      datetime t = iTime(_Symbol, _Period, i);
+      if(t <= 0)
          continue;
-      if(HistoryDealGetString(deal, DEAL_SYMBOL) != _Symbol)
-         continue;
-      if((ulong)HistoryDealGetInteger(deal, DEAL_MAGIC) != InpMagicNumber)
-         continue;
-      if((ENUM_DEAL_ENTRY)HistoryDealGetInteger(deal, DEAL_ENTRY) != DEAL_ENTRY_IN)
+      if(t <= after)
+         break;
+
+      double hi = iHigh(_Symbol, _Period, i);
+      double lo = iLow(_Symbol, _Period, i);
+      double op = iOpen(_Symbol, _Period, i);
+      double cl = iClose(_Symbol, _Period, i);
+      if(hi <= 0.0 || lo <= 0.0 || op <= 0.0 || cl <= 0.0)
          continue;
 
-      string cmt = HistoryDealGetString(deal, DEAL_COMMENT);
-      if(StringFind(cmt, "FiboBuy") < 0 && StringFind(cmt, "FiboSell") < 0)
-         continue;
-      if(StringFind(cmt, lvl786) >= 0)
+      double bodyHi = MathMax(op, cl);
+      double bodyLo = MathMin(op, cl);
+
+      // Wick rejection: body tetap di sisi 0, hanya wick yang menusuk 88.6.
+      // Candle yang merambah lewat 88.6 (mis. rally ke 23.6) tidak dihitung.
+      bool wickTouch = false;
+      if(g_fiboBullish)
+         wickTouch = (lo <= level && bodyLo > level);
+      else
+         wickTouch = (hi >= level && bodyHi < level);
+
+      if(wickTouch)
+      {
+         touchBar = t;
          return true;
+      }
    }
 
    return false;
@@ -2321,8 +2351,8 @@ bool FiboPriceTouchesLevel(const double level)
 bool FiboCutProfitLevelReached()
 {
    double level50  = FiboChartPrice(InpFiboLevel3);
-   double level786 = FiboChartPrice(InpFiboLevel5);
-   if(level50 <= 0.0 || level786 <= 0.0)
+   double level886 = FiboChartPrice(InpFiboLevel6);
+   if(level50 <= 0.0 || level886 <= 0.0)
       return false;
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -2330,11 +2360,11 @@ bool FiboCutProfitLevelReached()
    if(bid <= 0.0 || ask <= 0.0)
       return false;
 
-   // 50 di atas 78.6: cut profit saat harga naik melewati 50
-   if(level50 > level786)
+   // 50 di atas 88.6: cut profit saat harga naik melewati 50
+   if(level50 > level886)
       return (bid > level50);
 
-   // 50 di bawah 78.6: cut profit saat harga turun melewati 50
+   // 50 di bawah 88.6: cut profit saat harga turun melewati 50
    return (ask < level50);
 }
 
@@ -2343,25 +2373,34 @@ void CheckFiboCutProfit()
    if(!InpFiboCutProfit || !g_fiboActive)
       return;
 
-   if(HasFibo786Position() || Fibo786FilledOnLastBar())
+   datetime touchBar = 0;
+   if(FiboWickTouchesLevel(FiboChartPrice(InpFiboLevel6), touchBar))
    {
       if(!g_fiboCutProfitArmed)
-         g_fiboCutProfitArmBar = iTime(_Symbol, _Period, 0);
+      {
+         g_fiboCutProfitArmBar = touchBar;
+         Print("Cut profit armed: wick sentuh garis ",
+               DoubleToString(InpFiboLevel6, 1), " di ", TimeToString(touchBar));
+      }
       g_fiboCutProfitArmed = true;
    }
 
    if(!g_fiboCutProfitArmed)
       return;
 
-   // Bar fill 78.6: jangan cut profit di bar yang sama (hindari false trigger)
+   // Bar wick 88.6: jangan cut profit di bar yang sama (hindari false trigger)
    if(g_fiboCutProfitArmBar > 0 && iTime(_Symbol, _Period, 0) == g_fiboCutProfitArmBar)
+      return;
+
+   // Cut profit hanya untuk posisi dalam (61.8 / 78.6), bukan fill level 50
+   if(!HasFiboDeepPosition())
       return;
 
    if(!FiboCutProfitLevelReached())
       return;
 
    double level50 = FiboChartPrice(InpFiboLevel3);
-   Print("Cut profit: pending 78.6 sudah kebuka, harga melewati garis ",
+   Print("Cut profit: wick 88.6 sudah sentuh, harga melewati garis ",
          DoubleToString(InpFiboLevel3, 1), " (", DoubleToString(level50, _Digits),
          "). Tutup semua posisi/order EA.");
    CloseAllPositions();

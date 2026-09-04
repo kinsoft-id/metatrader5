@@ -1,13 +1,11 @@
 #property copyright "Copyright 2026, User"
-#property version   "1.20"
+#property version   "1.30"
 #property strict
 
 #include <Trade\Trade.mqh>
 
 #define CMT_L1      "BBWS_L1"
 #define CMT_L2      "BBWS_L2"
-#define CMT_L3      "BBWS_L3"
-#define CMT_SW1     "BBWS_SW1"
 #define ZZ_SIZE     50
 #define MAX_ZZ_DRAW 80
 
@@ -17,13 +15,6 @@ enum ENUM_LOT_MODE
    LOT_RISK_PERCENT = 1  // Auto dari risk % total
 };
 
-enum ENUM_BB_ENTRY_MODE
-{
-   BB_ENTRY_MID      = 0, // 3 layer di tengah BB (harga sama)
-   BB_ENTRY_SPREAD   = 1, // 3 layer di bottom / mid / top BB
-   BB_ENTRY_PROXIMAL = 2  // 3 layer di tepi proximal BB (harga sama)
-};
-
 input group "=== Market Structure ==="
 input int    InpLength            = 5;     // Length pivot
 input int    InpLookback          = 2000;  // Max bars scan
@@ -31,16 +22,10 @@ input bool   InpShowZZ            = true;  // Tampilkan ZigZag
 input bool   InpOnlyBody          = false; // Use only candle body
 input bool   InpTwoCandles        = false; // Use 2 candles
 input bool   InpOnlyWhenInPD      = false; // Filter PD array
-input double InpR2a               = 2.0;   // TP1 R:R
-input double InpR2b               = 3.0;   // TP2 R:R
-input double InpR2c               = 4.0;   // TP3 R:R
 
 input group "=== Entry ==="
-input bool               InpAllowBuy        = true;
-input bool               InpAllowSell       = true;
-input ENUM_BB_ENTRY_MODE InpBbEntryMode     = BB_ENTRY_PROXIMAL;
-input bool               InpPlaceSW1        = true;
-input bool               InpTradeExistingBB = true;
+input bool   InpAllowBuy          = true;
+input bool   InpAllowSell         = true;
 
 input group "=== SL (buffer wick M5) ==="
 input int    InpSlAtrPeriod       = 14;
@@ -62,7 +47,6 @@ input ulong  InpMagic            = 260902;
 input int    InpMaxSpread        = 80;
 input int    InpDeviation        = 30;
 input bool   InpOneSetup         = true;
-input bool   InpCancelOnMitigate = true;
 
 input group "=== Lainnya ==="
 input bool   InpShowDashboard    = true;
@@ -80,17 +64,23 @@ const int DASH_ROW = 17;
 
 struct BBSetup
 {
-   int    dir;
-   double bbTop;
-   double bbBot;
-   double bbMid;
-   double sw1;
-   double sw2;
-   double tp1;
-   double tp2;
-   double tp3;
-   double sl;
-   bool   valid;
+   int      dir;
+   int      createdIdx;
+   datetime signalTime;
+   double   bbTop;
+   double   bbBot;
+   double   bbMid;
+   double   sw1;
+   double   sw2;
+   double   pd1;
+   double   pd2;
+   double   tp1;
+   double   tp2;
+   double   sl;
+   bool     valid;
+   bool     broken;
+   bool     mitigated;
+   bool     hasSignal;
 };
 
 struct ZZPoint
@@ -209,17 +199,24 @@ void FinalizeSetup(BBSetup &s)
       return;
    int dg = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
    if(s.dir == 1)
-      s.sl = NormalizeDouble(s.sw2 - SlBufferPrice(false), dg);
+   {
+      s.sl  = NormalizeDouble(s.sw2 - SlBufferPrice(false), dg);
+      s.tp1 = NormalizeDouble(MathMin(s.pd1, s.pd2), dg);
+      s.tp2 = NormalizeDouble(MathMax(s.pd1, s.pd2), dg);
+   }
    else
-      s.sl = NormalizeDouble(s.sw2 + SlBufferPrice(true), dg);
+   {
+      s.sl  = NormalizeDouble(s.sw2 + SlBufferPrice(true), dg);
+      s.tp1 = NormalizeDouble(MathMax(s.pd1, s.pd2), dg);
+      s.tp2 = NormalizeDouble(MathMin(s.pd1, s.pd2), dg);
+   }
    s.bbTop = NormalizeDouble(s.bbTop, dg);
    s.bbBot = NormalizeDouble(s.bbBot, dg);
    s.bbMid = NormalizeDouble(s.bbMid, dg);
    s.sw1   = NormalizeDouble(s.sw1, dg);
    s.sw2   = NormalizeDouble(s.sw2, dg);
-   s.tp1   = NormalizeDouble(s.tp1, dg);
-   s.tp2   = NormalizeDouble(s.tp2, dg);
-   s.tp3   = NormalizeDouble(s.tp3, dg);
+   s.pd1   = NormalizeDouble(s.pd1, dg);
+   s.pd2   = NormalizeDouble(s.pd2, dg);
 }
 
 int ZZDir(const int idx)
@@ -319,31 +316,122 @@ void CombineSecond(const MqlRates &r[], const int j, const bool bull, int &idx, 
    bot = MathMin(bot, b2);
 }
 
-void SetCoreBB(const int dir, const double top, const double bot,
-               const double sw1, const double sw2)
+void FillPD(const int dir, const int n, const MqlRates &r[], double &pd1, double &pd2)
 {
-   ZeroMemory(g_core);
-   g_core.dir   = dir;
-   g_core.bbTop = top;
-   g_core.bbBot = bot;
-   g_core.bbMid = (top + bot) / 2.0;
-   g_core.sw1   = sw1;
-   g_core.sw2   = sw2;
-   const double I = top - bot;
+   pd1 = 0.0;
+   pd2 = 0.0;
+   int cnt = 0;
    if(dir == 1)
    {
-      g_core.tp1 = top + I * InpR2a;
-      g_core.tp2 = top + I * InpR2b;
-      g_core.tp3 = top + I * InpR2c;
+      double hh1 = r[n].high;
+      for(int c = 0; c < g_zzCount - 1; c++)
+      {
+         const int getX = g_zz[c].idx;
+         const double getY = g_zz[c].price;
+         if(g_zz[c].dir != 1 || getY <= hh1 || getX < 0 || getX >= n)
+            continue;
+         const double getY2 = (r[getX].high - BodyLow(r, getX)) / 4.0;
+         if(cnt == 0)
+         {
+            pd1 = getY;
+            cnt = 1;
+            hh1 = getY;
+         }
+         else if(getY - getY2 > hh1)
+         {
+            pd2 = getY;
+            break;
+         }
+      }
    }
    else
    {
-      g_core.tp1 = bot - I * InpR2a;
-      g_core.tp2 = bot - I * InpR2b;
-      g_core.tp3 = bot - I * InpR2c;
+      double ll1 = r[n].low;
+      for(int c = 0; c < g_zzCount - 1; c++)
+      {
+         const int getX = g_zz[c].idx;
+         const double getY = g_zz[c].price;
+         if(g_zz[c].dir != -1 || getY >= ll1 || getX < 0 || getX >= n)
+            continue;
+         const double getY2 = (BodyHigh(r, getX) - r[getX].low) / 4.0;
+         if(cnt == 0)
+         {
+            pd1 = getY;
+            cnt = 1;
+            ll1 = getY;
+         }
+         else if(getY + getY2 < ll1)
+         {
+            pd2 = getY;
+            break;
+         }
+      }
    }
-   g_core.valid = (top > bot && sw1 > 0.0 && sw2 > 0.0);
+}
+
+void SetCoreBB(const int dir, const int n, const MqlRates &r[],
+               const double top, const double bot,
+               const double sw1, const double sw2)
+{
+   ZeroMemory(g_core);
+   g_core.dir        = dir;
+   g_core.createdIdx = n;
+   g_core.bbTop      = top;
+   g_core.bbBot      = bot;
+   g_core.bbMid      = (top + bot) / 2.0;
+   g_core.sw1        = sw1;
+   g_core.sw2        = sw2;
+   FillPD(dir, n, r, g_core.pd1, g_core.pd2);
+   g_core.valid = (top > bot && sw1 > 0.0 && sw2 > 0.0 && g_core.pd1 > 0.0 && g_core.pd2 > 0.0);
    FinalizeSetup(g_core);
+}
+
+void UpdateBB(const int n, const MqlRates &r[])
+{
+   if(g_core.dir == 0 || g_core.mitigated)
+      return;
+
+   const double top = g_core.bbTop;
+   const double btm = g_core.bbBot;
+   const double avg = g_core.bbMid;
+   const bool after = (n > g_core.createdIdx);
+
+   if(g_core.dir == 1)
+   {
+      if(r[n].close < btm)
+      {
+         g_core.mitigated = true;
+         return;
+      }
+      if(after && !g_core.broken)
+      {
+         if(r[n].open > avg && r[n].open < top && r[n].close > top)
+         {
+            g_core.hasSignal  = true;
+            g_core.signalTime = r[n].time;
+         }
+         else if(r[n].close < avg && r[n].close > btm)
+            g_core.broken = true;
+      }
+   }
+   else
+   {
+      if(r[n].close > top)
+      {
+         g_core.mitigated = true;
+         return;
+      }
+      if(after && !g_core.broken)
+      {
+         if(r[n].open < avg && r[n].open > btm && r[n].close < btm)
+         {
+            g_core.hasSignal  = true;
+            g_core.signalTime = r[n].time;
+         }
+         else if(r[n].close > avg && r[n].close < top)
+            g_core.broken = true;
+      }
+   }
 }
 
 void UpdateZigZag(const int n, const int left, const MqlRates &r[])
@@ -413,7 +501,7 @@ void TryCreateMSS(const int n, const int total, const MqlRates &r[])
                   FillRange(r, j, top, bot);
                   if(InpTwoCandles)
                      CombineSecond(r, j, true, idx, top, bot);
-                  SetCoreBB(1, top, bot, Cy, Ey);
+                  SetCoreBB(1, n, r, top, bot, Cy, Ey);
                   break;
                }
             }
@@ -450,7 +538,7 @@ void TryCreateMSS(const int n, const int total, const MqlRates &r[])
                   FillRange(r, j, top, bot);
                   if(InpTwoCandles)
                      CombineSecond(r, j, false, idx, top, bot);
-                  SetCoreBB(-1, top, bot, Cy, Ey);
+                  SetCoreBB(-1, n, r, top, bot, Cy, Ey);
                   break;
                }
             }
@@ -487,6 +575,14 @@ void CoreScan()
    {
       UpdateZigZag(n, left, r);
       TryCreateMSS(n, copied, r);
+      UpdateBB(n, r);
+   }
+
+   if(g_core.hasSignal)
+   {
+      datetime closed = iTime(_Symbol, _Period, 1);
+      if(g_core.signalTime != closed)
+         g_core.hasSignal = false;
    }
 }
 
@@ -591,9 +687,9 @@ void DeleteOurPendings()
 string SetupKey(const BBSetup &s)
 {
    return IntegerToString(s.dir) + "|" +
-          DoubleToString(s.bbTop, _Digits) + "|" +
-          DoubleToString(s.bbBot, _Digits) + "|" +
-          DoubleToString(s.sw2, _Digits);
+          TimeToString(s.signalTime, TIME_DATE|TIME_MINUTES) + "|" +
+          DoubleToString(s.pd1, _Digits) + "|" +
+          DoubleToString(s.pd2, _Digits);
 }
 
 bool ReadSetup(BBSetup &s)
@@ -602,7 +698,7 @@ bool ReadSetup(BBSetup &s)
    return s.valid;
 }
 
-int TotalLayersPlanned() { return 3 + (InpPlaceSW1 ? 1 : 0); }
+int TotalLayersPlanned() { return 2; }
 
 double CalcLot(const ENUM_ORDER_TYPE type, const double entry, const double sl, const int layers)
 {
@@ -622,11 +718,13 @@ double CalcLot(const ENUM_ORDER_TYPE type, const double entry, const double sl, 
 bool SetupSane(const BBSetup &s)
 {
    double minDist = MinStopDistance();
+   if(s.pd1 <= 0.0 || s.pd2 <= 0.0)
+      return false;
    if(s.dir == -1)
    {
       if(s.sl <= s.sw2)
          return false;
-      if(s.tp1 >= s.bbBot || s.tp2 >= s.bbBot || s.tp3 >= s.bbBot)
+      if(s.tp1 >= s.bbBot || s.tp2 >= s.bbBot)
          return false;
       if(s.sl - s.bbMid < minDist)
          return false;
@@ -635,7 +733,7 @@ bool SetupSane(const BBSetup &s)
    {
       if(s.sl >= s.sw2)
          return false;
-      if(s.tp1 <= s.bbTop || s.tp2 <= s.bbTop || s.tp3 <= s.bbTop)
+      if(s.tp1 <= s.bbTop || s.tp2 <= s.bbTop)
          return false;
       if(s.bbMid - s.sl < minDist)
          return false;
@@ -651,14 +749,12 @@ bool IsMitigated(const BBSetup &s)
    return (close0 > s.bbTop);
 }
 
-bool PlaceLimit(const bool buy, const double lot, const double entry,
-                const double sl, const double tp, const string comment)
+bool PlaceMarket(const bool buy, const double lot, const double sl, const double tp, const string comment)
 {
-   if(lot <= 0.0 || entry <= 0.0 || sl <= 0.0 || tp <= 0.0)
+   if(lot <= 0.0 || sl <= 0.0 || tp <= 0.0)
       return false;
 
    int dg = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-   double e   = NormalizeDouble(entry, dg);
    double sln = NormalizeDouble(sl, dg);
    double tpn = NormalizeDouble(tp, dg);
    double minDist = MinStopDistance();
@@ -667,67 +763,46 @@ bool PlaceLimit(const bool buy, const double lot, const double entry,
 
    if(buy)
    {
-      if(e >= ask || ask - e < minDist || sln >= e || tpn <= e)
+      if(sln >= ask || tpn <= ask)
          return false;
-      if(e - sln < minDist)
-         sln = NormalizeDouble(e - minDist, dg);
-      if(tpn - e < minDist)
+      if(ask - sln < minDist)
+         sln = NormalizeDouble(ask - minDist, dg);
+      if(tpn - ask < minDist)
          return false;
-      if(!trade.BuyLimit(lot, e, _Symbol, sln, tpn, ORDER_TIME_GTC, 0, comment))
+      if(!trade.Buy(lot, _Symbol, ask, sln, tpn, comment))
       {
-         Print("BuyLimit gagal ", comment, ": ", trade.ResultRetcodeDescription());
+         Print("Buy gagal ", comment, ": ", trade.ResultRetcodeDescription());
          return false;
       }
+      Print("BUY ", comment, " lot=", DoubleToString(lot, 2),
+            " @ ", DoubleToString(ask, dg),
+            " SL=", DoubleToString(sln, dg),
+            " TP=", DoubleToString(tpn, dg));
    }
    else
    {
-      if(e <= bid || e - bid < minDist || sln <= e || tpn >= e)
+      if(sln <= bid || tpn >= bid)
          return false;
-      if(sln - e < minDist)
-         sln = NormalizeDouble(e + minDist, dg);
-      if(e - tpn < minDist)
+      if(sln - bid < minDist)
+         sln = NormalizeDouble(bid + minDist, dg);
+      if(bid - tpn < minDist)
          return false;
-      if(!trade.SellLimit(lot, e, _Symbol, sln, tpn, ORDER_TIME_GTC, 0, comment))
+      if(!trade.Sell(lot, _Symbol, bid, sln, tpn, comment))
       {
-         Print("SellLimit gagal ", comment, ": ", trade.ResultRetcodeDescription());
+         Print("Sell gagal ", comment, ": ", trade.ResultRetcodeDescription());
          return false;
       }
+      Print("SELL ", comment, " lot=", DoubleToString(lot, 2),
+            " @ ", DoubleToString(bid, dg),
+            " SL=", DoubleToString(sln, dg),
+            " TP=", DoubleToString(tpn, dg));
    }
-
-   Print((buy ? "BUY " : "SELL "), comment,
-         " lot=", DoubleToString(lot, 2),
-         " @ ", DoubleToString(e, dg),
-         " SL=", DoubleToString(sln, dg),
-         " TP=", DoubleToString(tpn, dg));
    return true;
-}
-
-void BbLayerPrices(const BBSetup &s, double &p1, double &p2, double &p3)
-{
-   if(InpBbEntryMode == BB_ENTRY_MID)
-   {
-      p1 = s.bbMid; p2 = s.bbMid; p3 = s.bbMid;
-      return;
-   }
-   if(InpBbEntryMode == BB_ENTRY_PROXIMAL)
-   {
-      const double p = (s.dir == -1) ? s.bbBot : s.bbTop;
-      p1 = p; p2 = p; p3 = p;
-      return;
-   }
-   if(s.dir == -1)
-   {
-      p1 = s.bbBot; p2 = s.bbMid; p3 = s.bbTop;
-   }
-   else
-   {
-      p1 = s.bbTop; p2 = s.bbMid; p3 = s.bbBot;
-   }
 }
 
 bool PlaceSetup(const BBSetup &s)
 {
-   if(!s.valid || !SetupSane(s))
+   if(!s.valid || !s.hasSignal || !SetupSane(s))
       return false;
    if(s.dir == 1 && !InpAllowBuy)
       return false;
@@ -738,30 +813,26 @@ bool PlaceSetup(const BBSetup &s)
 
    const bool buy = (s.dir == 1);
    const ENUM_ORDER_TYPE ot = buy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-   const int layers = TotalLayersPlanned();
-   double e1, e2, e3;
-   BbLayerPrices(s, e1, e2, e3);
+   const int layers = 2;
+   double price = buy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
+                      : SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
    string c1 = LayerComment(CMT_L1, s);
    string c2 = LayerComment(CMT_L2, s);
-   string c3 = LayerComment(CMT_L3, s);
-   string cs = LayerComment(CMT_SW1, s);
 
    int placed = 0;
-   if(!LayerExists(c1) && PlaceLimit(buy, CalcLot(ot, e1, s.sl, layers), e1, s.sl, s.tp1, c1))
+   if(!LayerExists(c1) && PlaceMarket(buy, CalcLot(ot, price, s.sl, layers), s.sl, s.tp1, c1))
       placed++;
-   if(!LayerExists(c2) && PlaceLimit(buy, CalcLot(ot, e2, s.sl, layers), e2, s.sl, s.tp2, c2))
-      placed++;
-   if(!LayerExists(c3) && PlaceLimit(buy, CalcLot(ot, e3, s.sl, layers), e3, s.sl, s.tp3, c3))
-      placed++;
-   if(InpPlaceSW1 && !LayerExists(cs) && PlaceLimit(buy, CalcLot(ot, s.sw1, s.sl, layers), s.sw1, s.sl, s.tp1, cs))
+   if(!LayerExists(c2) && PlaceMarket(buy, CalcLot(ot, price, s.sl, layers), s.sl, s.tp2, c2))
       placed++;
 
    if(placed > 0)
    {
       g_setupKey = SetupKey(s);
-      Print("BB setup ", (buy ? "BULL +BB" : "BEAR -BB"),
-            " placed ", placed, " orders | key=", g_setupKey);
+      Print("Signal ", (buy ? "UP" : "DN"),
+            " ", placed, " layer | PD1=", DoubleToString(s.tp1, _Digits),
+            " PD2=", DoubleToString(s.tp2, _Digits),
+            " | key=", g_setupKey);
       return true;
    }
    return false;
@@ -872,7 +943,6 @@ void DrawSetupVisuals(const BBSetup &s)
       HideEa(PREF + "VIS_SW2");
       HideEa(PREF + "VIS_TP1");
       HideEa(PREF + "VIS_TP2");
-      HideEa(PREF + "VIS_TP3");
       HideEa(PREF + "VIS_SL");
       return;
    }
@@ -884,36 +954,20 @@ void DrawSetupVisuals(const BBSetup &s)
    EaHLine(PREF + "VIS_SW2", s.sw2, clrOrange, STYLE_SOLID);
    EaHLine(PREF + "VIS_TP1", s.tp1, C'33,87,243', STYLE_DOT);
    EaHLine(PREF + "VIS_TP2", s.tp2, C'33,87,243', STYLE_DOT);
-   EaHLine(PREF + "VIS_TP3", s.tp3, C'33,87,243', STYLE_DOT);
    EaHLine(PREF + "VIS_SL",  s.sl,  clrRed, STYLE_DASH);
 }
 
 void ManageSetup()
 {
    BBSetup s;
-   if(!ReadSetup(s))
+   if(!ReadSetup(s) || !s.hasSignal)
       return;
-
-   if(InpCancelOnMitigate && IsMitigated(s) && CountOurPendings() > 0)
-   {
-      Print("BB mitigated — hapus pending");
-      DeleteOurPendings();
-      return;
-   }
 
    const string key = SetupKey(s);
-   const bool newBb = (key != g_setupKey && g_setupKey != "");
-   if(newBb)
-   {
-      if(InpOneSetup && CountOurPositions() > 0)
-         return;
-      DeleteOurPendings();
-      g_setupKey = "";
-   }
-
-   if(IsMitigated(s))
+   if(key == g_setupKey)
       return;
-   if(InpOneSetup && CountOurPositions() > 0 && g_setupKey == "" && !newBb)
+
+   if(InpOneSetup && CountOurPositions() > 0)
       return;
 
    PlaceSetup(s);
@@ -961,28 +1015,38 @@ void UpdateDashboard()
       return;
    }
 
-   string side = (g_core.dir == 1) ? "+BB BUY" : "-BB SELL";
-   color  sc   = (g_core.dir == 1) ? clrForestGreen : clrFireBrick;
-   CreateLabel(PREF + "st", DASH_X, y, side + (IsMitigated(g_core) ? "  (mitigated)" : ""), sc);
+   string side = (g_core.dir == 1) ? "+BB" : "-BB";
+   if(g_core.hasSignal)
+      side += (g_core.dir == 1) ? "  SIGNAL UP" : "  SIGNAL DN";
+   else if(g_core.mitigated)
+      side += "  mitigated";
+   else if(g_core.broken)
+      side += "  cancel";
+   else
+      side += "  wait signal";
+
+   color sc = clrGray;
+   if(g_core.hasSignal)
+      sc = (g_core.dir == 1) ? clrLime : clrOrange;
+   else if(g_core.dir == 1)
+      sc = clrForestGreen;
+   else
+      sc = clrFireBrick;
+
+   CreateLabel(PREF + "st", DASH_X, y, side, sc);
    y += DASH_ROW;
    CreateLabel(PREF + "bb", DASH_X, y,
                "BB " + DoubleToString(g_core.bbBot, _Digits) + " .. " + DoubleToString(g_core.bbTop, _Digits),
                clrBlack);
    y += DASH_ROW;
-   CreateLabel(PREF + "sw", DASH_X, y,
-               "SW1 " + DoubleToString(g_core.sw1, _Digits) +
-               " | SW2 " + DoubleToString(g_core.sw2, _Digits),
-               clrBlack);
+   CreateLabel(PREF + "pd", DASH_X, y,
+               "PD1 " + DoubleToString(g_core.tp1, _Digits) +
+               " | PD2 " + DoubleToString(g_core.tp2, _Digits),
+               clrTeal);
    y += DASH_ROW;
    CreateLabel(PREF + "sl", DASH_X, y,
-               "SL " + DoubleToString(g_core.sl, _Digits),
+               "SL " + DoubleToString(g_core.sl, _Digits) + "  (SW2 + wick M5)",
                clrOrangeRed);
-   y += DASH_ROW;
-   CreateLabel(PREF + "tp", DASH_X, y,
-               "TP1 " + DoubleToString(g_core.tp1, _Digits) +
-               " | TP2 " + DoubleToString(g_core.tp2, _Digits) +
-               " | TP3 " + DoubleToString(g_core.tp3, _Digits),
-               clrTeal);
 }
 
 int OnInit()
