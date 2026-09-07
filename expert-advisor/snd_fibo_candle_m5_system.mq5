@@ -1997,8 +1997,7 @@ void PlaceFiboBuyAll()
 
    DeleteFiboPending(true);
    DeleteFiboPending(false);
-   g_fiboCutProfitArmed = false;
-   g_fiboCutProfitArmBar = 0;
+   ResetFiboCutProfit(true);
 
    int placed = 0;
    string sel = "";
@@ -2027,8 +2026,7 @@ void PlaceFiboSellAll()
 
    DeleteFiboPending(false);
    DeleteFiboPending(true);
-   g_fiboCutProfitArmed = false;
-   g_fiboCutProfitArmBar = 0;
+   ResetFiboCutProfit(true);
 
    int placed = 0;
    string sel = "";
@@ -2054,6 +2052,8 @@ void PlaceFiboDirLimit(const int kind)
       Print("Limit Fibo: scan / pilih fibo dulu.");
       return;
    }
+
+   ResetFiboCutProfit(true);
 
    double entryLv = 0.0;
    double slLv    = 0.0;
@@ -2297,9 +2297,9 @@ bool FiboWickTouchesLevel(const double level, datetime &touchBar)
 
    datetime after = (g_fiboWickAfter > 0) ? g_fiboWickAfter : g_fiboTime;
 
-   int bars = Bars(_Symbol, _Period);
-   int maxShift = (int)MathMin((double)(bars - 1), 500.0);
-   for(int i = 0; i <= maxShift; i++)
+   // Hanya candle berjalan + yang baru tutup. Jangan pakai wick 88.6
+   // dari impulse lama (itu yang bikin cut profit jalan di retrace 61.8).
+   for(int i = 0; i <= 1; i++)
    {
       datetime t = iTime(_Symbol, _Period, i);
       if(t <= 0)
