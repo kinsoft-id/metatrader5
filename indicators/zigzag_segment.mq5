@@ -12,6 +12,8 @@ input group "Segment Box"
 input color InpBullColor = C'144,238,144'; // Hijau: low → high
 input color InpBearColor = C'255,182,193'; // Merah: high → low
 input bool  InpShowActive = true;         // Tampilkan segmen ekstrem aktif
+input bool  InpShowBoxWidth = true;       // Tampilkan lebar area
+input int   InpBoxWidthFont = 8;          // Ukuran teks lebar area
 
 input group "Fibonacci"
 input bool  InpShowSegmentFibo = false; // Fibo per segmen (off jika pakai EA Fibo)
@@ -453,12 +455,61 @@ void EnsureBox(const string name, const PivotPoint &from, const PivotPoint &to)
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, col);
 }
 
+string FormatBoxWidth(const double range)
+{
+   if(range <= 0.0)
+      return "0";
+
+   double pip = (_Digits == 3 || _Digits == 5) ? (_Point * 10.0) : _Point;
+   return IntegerToString((int)MathRound(range / pip));
+}
+
+void EnsureBoxWidth(const string name, const PivotPoint &from, const PivotPoint &to, const color col)
+{
+   if(!InpShowBoxWidth)
+   {
+      ObjectDelete(0, name);
+      return;
+   }
+
+   double top = MathMax(from.price, to.price);
+   double bot = MathMin(from.price, to.price);
+   datetime t1 = from.time;
+   datetime t2 = to.time;
+   if(t2 < t1)
+   {
+      datetime tmp = t1;
+      t1 = t2;
+      t2 = tmp;
+   }
+
+   datetime midT = t1 + (t2 - t1) / 2;
+   double   midP = (top + bot) / 2.0;
+   string   text = FormatBoxWidth(top - bot);
+
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_TEXT, 0, midT, midP);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+      ObjectSetString(0, name, OBJPROP_FONT, "Arial");
+   }
+   else
+      ObjectMove(0, name, 0, midT, midP);
+
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpBoxWidthFont);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, col);
+}
+
 void ClearSegmentObjects(const int keepCount)
 {
    for(int i = keepCount; i < InpMaxPivots + 2; i++)
    {
       ObjectDelete(0, PREFIX + "LN_" + IntegerToString(i));
       ObjectDelete(0, PREFIX + "BX_" + IntegerToString(i));
+      ObjectDelete(0, PREFIX + "BW_" + IntegerToString(i));
       ObjectDelete(0, PREFIX + "FB_" + IntegerToString(i));
    }
 }
@@ -472,6 +523,7 @@ void UpdateObjects(const PivotPoint &pivots[], const int count,
    {
       EnsureLine(PREFIX + "LN_" + IntegerToString(seg), pivots[k - 1], pivots[k]);
       EnsureBox(PREFIX + "BX_" + IntegerToString(seg), pivots[k - 1], pivots[k]);
+      EnsureBoxWidth(PREFIX + "BW_" + IntegerToString(seg), pivots[k - 1], pivots[k], InpLineColor);
       ObjectDelete(0, PREFIX + "FB_" + IntegerToString(seg));
       seg++;
    }
@@ -481,6 +533,7 @@ void UpdateObjects(const PivotPoint &pivots[], const int count,
    {
       EnsureLine(PREFIX + "LN_" + IntegerToString(seg), pivots[count - 1], active);
       EnsureBox(PREFIX + "BX_" + IntegerToString(seg), pivots[count - 1], active);
+      EnsureBoxWidth(PREFIX + "BW_" + IntegerToString(seg), pivots[count - 1], active, InpLineColor);
       ObjectDelete(0, PREFIX + "FB_" + IntegerToString(seg));
       seg++;
    }
