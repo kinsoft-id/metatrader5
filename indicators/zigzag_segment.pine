@@ -1,0 +1,299 @@
+//@version=6
+indicator("ZigZag Segment", overlay = true, max_bars_back = 5000, max_boxes_count = 100, max_lines_count = 500, max_labels_count = 200)
+
+// Port dari zigzag_segment.mq5 v1.13
+// Cara pakai: TradingView → Pine Editor → paste → Add to chart
+
+type PivotPoint
+    int t
+    float price
+    bool isHigh
+
+string grpZz   = "ZigZag"
+string grpBox  = "Segment Box"
+string grpFibo = "Fibonacci"
+string grpHL   = "Previous High/Low"
+
+color lineColor = input.color(#696969, "Line Color", group = grpZz)
+int   lineWidth = input.int(1, "Line Width", minval = 1, maxval = 5, group = grpZz)
+int   maxPivots = input.int(30, "Max swing tersimpan", minval = 4, maxval = 50, group = grpZz)
+
+color bullColor    = input.color(color.rgb(144, 238, 144), "Hijau: low → high", group = grpBox)
+color bearColor    = input.color(color.rgb(255, 182, 193), "Merah: high → low", group = grpBox)
+bool  showActive   = input.bool(true, "Tampilkan segmen ekstrem aktif", group = grpBox)
+bool  showBoxWidth = input.bool(true, "Tampilkan lebar area", group = grpBox)
+int   boxWidthFont = input.int(8, "Ukuran teks lebar area", minval = 6, maxval = 20, group = grpBox)
+
+bool  showSegmentFibo = input.bool(true, "Fibo per segmen", group = grpFibo)
+color fiboColor       = input.color(#C0C0C0, "Fibo Color", group = grpFibo)
+int   fiboWidth       = input.int(1, "Fibo Width", minval = 1, maxval = 5, group = grpFibo)
+bool  fiboShowLabels  = input.bool(false, "Show label level", group = grpFibo)
+bool  fibo236         = input.bool(true, "Show 23.6", group = grpFibo)
+bool  fibo382         = input.bool(true, "Show 38.2", group = grpFibo)
+bool  fibo50          = input.bool(true, "Show 50.0", group = grpFibo)
+bool  fibo618         = input.bool(true, "Show 61.8", group = grpFibo)
+bool  fibo786         = input.bool(true, "Show 78.6", group = grpFibo)
+bool  fibo886         = input.bool(true, "Show 88.6", group = grpFibo)
+
+bool   showH1HL    = input.bool(true, "Tampilkan previous high/low", group = grpHL)
+string hlTimeframe = input.string("H1", "Timeframe", options = ["H1", "H4", "D1"], group = grpHL)
+int    h1MaxShow   = input.int(3, "Max show", minval = 0, maxval = 20, group = grpHL)
+string h1LineEnd   = input.string("Sampai close TF", "Ujung garis", options = ["Sampai ke kanan", "Sampai close TF"], group = grpHL)
+color  h1BullColor = input.color(#228B22, "Bull Color", group = grpHL)
+color  h1BearColor = input.color(#DC143C, "Bear Color", group = grpHL)
+int    h1LineWidth = input.int(1, "Line Width", minval = 1, maxval = 5, group = grpHL)
+string h1LineStyle = input.string("Dashed", "Line Style", options = ["Solid", "Dashed", "Dotted"], group = grpHL)
+int    h1FontSize  = input.int(8, "Font Size", minval = 6, maxval = 20, group = grpHL)
+
+string hlTfStr = switch hlTimeframe
+    "H4" => "240"
+    "D1" => "1D"
+    => "60"
+int hlKeep = math.max(1, math.min(20, h1MaxShow))
+
+var array<box>   zzBoxes  = array.new<box>()
+var array<line>  zzLines  = array.new<line>()
+var array<label> zzLabels = array.new<label>()
+var array<float> hlOpens  = array.new<float>()
+var array<float> hlHighs  = array.new<float>()
+var array<float> hlLows   = array.new<float>()
+var array<float> hlCloses = array.new<float>()
+var array<int>   hlTimes  = array.new<int>()
+var int lastDone = na
+
+labelSizeFrom(int s) =>
+    s <= 6 ? size.tiny : s <= 9 ? size.small : s <= 12 ? size.normal : size.large
+
+lineStyleFrom(string s) =>
+    switch s
+        "Solid"  => line.style_solid
+        "Dotted" => line.style_dotted
+        => line.style_dashed
+
+pipSize() =>
+    float pt = syminfo.mintick
+    int digits = int(math.round(math.log(1.0 / pt) / math.log(10.0)))
+    pt * (digits == 3 or digits == 5 ? 10.0 : 1.0)
+
+formatBoxWidth(float rng) =>
+    rng <= 0 ? "0" : str.tostring(int(math.round(rng / pipSize())))
+
+bodyBreakUp(float closePrice, float level) =>
+    closePrice > level
+
+bodyBreakDown(float closePrice, float level) =>
+    closePrice < level
+
+pushPivot(array<PivotPoint> pivots, int maxKeep, int t, float price, bool isHigh) =>
+    if pivots.size() < maxKeep
+        pivots.push(PivotPoint.new(t, price, isHigh))
+    else
+        pivots.shift()
+        pivots.push(PivotPoint.new(t, price, isHigh))
+
+startOpposite(int pivotIdx, int upToIdx, bool nextIsHigh) =>
+    int start = pivotIdx + 1
+    int extreme = start
+    bool hasEx = start <= upToIdx
+    if hasEx and start < upToIdx
+        for j = start + 1 to upToIdx
+            if nextIsHigh
+                if high[bar_index - j] > high[bar_index - extreme]
+                    extreme := j
+            else if low[bar_index - j] < low[bar_index - extreme]
+                extreme := j
+    [extreme, hasEx, nextIsHigh]
+
+clearDrawings() =>
+    if zzBoxes.size() > 0
+        for b in zzBoxes
+            box.delete(b)
+        zzBoxes.clear()
+    if zzLines.size() > 0
+        for ln in zzLines
+            line.delete(ln)
+        zzLines.clear()
+    if zzLabels.size() > 0
+        for lb in zzLabels
+            label.delete(lb)
+        zzLabels.clear()
+
+plotFiboLevel(int t1, int t2, float px, string txt) =>
+    line ln = line.new(t1, px, t2, px, xloc = xloc.bar_time, color = fiboColor, width = fiboWidth, style = line.style_dotted)
+    zzLines.push(ln)
+    if fiboShowLabels
+        label lb = label.new(t2, px, " " + txt, xloc = xloc.bar_time, style = label.style_none, textcolor = fiboColor, size = size.tiny, textalign = text.align_left)
+        zzLabels.push(lb)
+
+drawFibo(PivotPoint fromP, PivotPoint toP) =>
+    int t1 = math.min(fromP.t, toP.t)
+    int t2 = math.max(fromP.t, toP.t)
+    // Retracement dari ujung swing (to): 23.6 dekat ekstrem, 88.6 dekat awal.
+    float rng = toP.price - fromP.price
+    if fibo236
+        plotFiboLevel(t1, t2, toP.price - rng * 0.236, "23.6")
+    if fibo382
+        plotFiboLevel(t1, t2, toP.price - rng * 0.382, "38.2")
+    if fibo50
+        plotFiboLevel(t1, t2, toP.price - rng * 0.500, "50.0")
+    if fibo618
+        plotFiboLevel(t1, t2, toP.price - rng * 0.618, "61.8")
+    if fibo786
+        plotFiboLevel(t1, t2, toP.price - rng * 0.786, "78.6")
+    if fibo886
+        plotFiboLevel(t1, t2, toP.price - rng * 0.886, "88.6")
+
+drawSegment(PivotPoint fromP, PivotPoint toP) =>
+    color col = toP.isHigh ? bullColor : bearColor
+    if fromP.isHigh and not toP.isHigh
+        col := bearColor
+    else if not fromP.isHigh and toP.isHigh
+        col := bullColor
+    float top = math.max(fromP.price, toP.price)
+    float bot = math.min(fromP.price, toP.price)
+    int t1 = math.min(fromP.t, toP.t)
+    int t2 = math.max(fromP.t, toP.t)
+    line ln = line.new(fromP.t, fromP.price, toP.t, toP.price, xloc = xloc.bar_time, color = lineColor, width = lineWidth)
+    zzLines.push(ln)
+    box bx = box.new(t1, top, t2, bot, xloc = xloc.bar_time, border_color = col, bgcolor = color.new(col, 100), border_width = 2)
+    zzBoxes.push(bx)
+    if showBoxWidth
+        int midT = int(math.round((t1 + t2) / 2.0))
+        float midP = (top + bot) / 2.0
+        label lb = label.new(midT, midP, formatBoxWidth(top - bot), xloc = xloc.bar_time, style = label.style_none, textcolor = lineColor, size = labelSizeFrom(boxWidthFont))
+        zzLabels.push(lb)
+    if showSegmentFibo
+        drawFibo(fromP, toP)
+
+drawHLLevels() =>
+    if showH1HL and h1MaxShow > 0
+        int sz = hlTimes.size()
+        int nShow = math.min(hlKeep, sz)
+        if nShow > 0
+            int fromIdx = sz - nShow
+            int tfMs = int(timeframe.in_seconds(hlTfStr) * 1000)
+            bool rayRight = h1LineEnd == "Sampai ke kanan"
+            for i = fromIdx to sz - 1
+                float o = hlOpens.get(i)
+                float h = hlHighs.get(i)
+                float l = hlLows.get(i)
+                float c = hlCloses.get(i)
+                int t = hlTimes.get(i)
+                bool isBull = c >= o
+                color col = isBull ? h1BullColor : h1BearColor
+                int t2 = t + tfMs
+                line hLn = line.new(t, h, t2, h, xloc = xloc.bar_time, color = col, width = h1LineWidth, style = lineStyleFrom(h1LineStyle), extend = rayRight ? extend.right : extend.none)
+                line lLn = line.new(t, l, t2, l, xloc = xloc.bar_time, color = col, width = h1LineWidth, style = lineStyleFrom(h1LineStyle), extend = rayRight ? extend.right : extend.none)
+                zzLines.push(hLn)
+                zzLines.push(lLn)
+                label hLb = label.new(t, h, isBull ? " Bullish" : " Strong High", xloc = xloc.bar_time, style = label.style_label_down, color = color.new(color.black, 100), textcolor = col, size = labelSizeFrom(h1FontSize))
+                label lLb = label.new(t, l, isBull ? " Strong Low" : " Bearish", xloc = xloc.bar_time, style = label.style_label_up, color = color.new(color.black, 100), textcolor = col, size = labelSizeFrom(h1FontSize))
+                zzLabels.push(hLb)
+                zzLabels.push(lLb)
+
+[secO, secH, secL, secC, secT] = request.security(syminfo.tickerid, hlTfStr, [open[1], high[1], low[1], close[1], time[1]], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+if not na(secT)
+    bool isNewHtf = hlTimes.size() == 0
+    if not isNewHtf
+        isNewHtf := hlTimes.get(-1) != secT
+    if isNewHtf
+        hlOpens.push(secO)
+        hlHighs.push(secH)
+        hlLows.push(secL)
+        hlCloses.push(secC)
+        hlTimes.push(secT)
+        while hlTimes.size() > 20
+            hlOpens.shift()
+            hlHighs.shift()
+            hlLows.shift()
+            hlCloses.shift()
+            hlTimes.shift()
+
+if barstate.islast
+    int lastClosed = barstate.isconfirmed ? bar_index : math.max(0, bar_index - 1)
+    bool needCalc = na(lastDone) or lastClosed != lastDone
+    if needCalc and lastClosed >= 3
+        lastDone := lastClosed
+        int maxKeep = math.max(4, maxPivots)
+        int startI = math.max(0, lastClosed - 4998)
+        array<PivotPoint> pivots = array.new<PivotPoint>()
+        bool lookingForHigh = true
+        int extreme = startI
+        bool hasExtreme = false
+        int pendingA = -1
+
+        for i = startI to lastClosed
+            float hi = high[bar_index - i]
+            float lo = low[bar_index - i]
+            float cl = close[bar_index - i]
+            if not hasExtreme
+                extreme := i
+                hasExtreme := true
+                pendingA := -1
+            else if lookingForHigh
+                if hi > high[bar_index - extreme]
+                    extreme := i
+                    pendingA := -1
+                else if i > extreme
+                    if pendingA < 0
+                        if bodyBreakDown(cl, low[bar_index - extreme])
+                            pendingA := i
+                    else if i > pendingA
+                        if bodyBreakDown(cl, close[bar_index - pendingA])
+                            int pivotIdx = extreme
+                            pushPivot(pivots, maxKeep, time[bar_index - pivotIdx], high[bar_index - pivotIdx], true)
+                            [nx, hx, lf] = startOpposite(pivotIdx, i, false)
+                            extreme := nx
+                            hasExtreme := hx
+                            lookingForHigh := lf
+                            pendingA := -1
+            else
+                if lo < low[bar_index - extreme]
+                    extreme := i
+                    pendingA := -1
+                else if i > extreme
+                    if pendingA < 0
+                        if bodyBreakUp(cl, high[bar_index - extreme])
+                            pendingA := i
+                    else if i > pendingA
+                        if bodyBreakUp(cl, close[bar_index - pendingA])
+                            int pivotIdx = extreme
+                            pushPivot(pivots, maxKeep, time[bar_index - pivotIdx], low[bar_index - pivotIdx], false)
+                            [nx, hx, lf] = startOpposite(pivotIdx, i, true)
+                            extreme := nx
+                            hasExtreme := hx
+                            lookingForHigh := lf
+                            pendingA := -1
+
+        int count = pivots.size()
+        bool hasActive = false
+        bool hasActiveLine = false
+        PivotPoint active = PivotPoint.new(0, 0.0, false)
+        if hasExtreme and count > 0
+            active := PivotPoint.new(time[bar_index - extreme], lookingForHigh ? high[bar_index - extreme] : low[bar_index - extreme], lookingForHigh)
+            PivotPoint lastP = pivots.get(count - 1)
+            if active.t > lastP.t
+                hasActive := true
+        if hasActive and count >= 2
+            PivotPoint nearest = pivots.get(count - 1)
+            PivotPoint opposite = pivots.get(count - 2)
+            float lastCl = close[bar_index - lastClosed]
+            if nearest.t < active.t and nearest.isHigh != opposite.isHigh
+                if not nearest.isHigh
+                    if active.isHigh and opposite.isHigh and bodyBreakUp(lastCl, opposite.price)
+                        hasActiveLine := true
+                else if not active.isHigh and not opposite.isHigh and bodyBreakDown(lastCl, opposite.price)
+                    hasActiveLine := true
+
+        clearDrawings()
+        if count >= 2
+            for k = 1 to count - 1
+                drawSegment(pivots.get(k - 1), pivots.get(k))
+        if showActive and hasActive and hasActiveLine and count > 0
+            drawSegment(pivots.get(count - 1), active)
+        drawHLLevels()
+    else if needCalc
+        lastDone := lastClosed
+        clearDrawings()
+        drawHLLevels()
