@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                             SND_Fibo_Candle_m5_System.mq5|
+//|                                             SND_Fibo_Candle_m2_System.mq5|
 //|                                  Copyright 2026, User            |
 //+------------------------------------------------------------------+
 #property strict
@@ -52,7 +52,11 @@ enum ENUM_LOT_MODE
 
 input group "--- RISK & TRANSMISSION ---"
 input ENUM_LOT_MODE InpLotMode     = LOT_AUTO_RISK; // Mode lot
-input double        InpRiskPercent = 1.0;        // Risk % auto (default 1, max 1%)
+input double        InpRiskPercent = 0.12;        // Risk % auto (default 1, max 1%)
+input bool          InpHardDailyStop = true;     // Hard Daily Stop (close semua + disable)
+input double        InpMaxDailyLossPercent = 2.0; // Hard stop jika Daily PnL+floating <= -%
+input int           InpMaxTradesPerDay = 16;     // Max trades per hari (dari history)
+input int           InpMaxOpenSimultaneous = 5;  // Max posisi/order terbuka bersamaan
 input ulong InpMagicNumber = 2222; // Magic Number (Harus beda tiap chart)
 
 
@@ -99,7 +103,7 @@ void UpdateInput(string name, double price);
 double GetInputValue(string name);
 void PlaceBuyNow();
 void PlaceSellNow();
-void PlaceLmzOrders(const bool isBuy);
+void PlaceRegimeOrders(const bool isBuy, const bool isVolatile);
 void GetHighImpactUSDNews();
 int  GetInitialY(string name);
 void CreateObject(string name, ENUM_OBJECT type, int win, int x, int y, int w, int h, color clr);
@@ -173,6 +177,23 @@ bool HasFiboDeepPosition();
 bool IsFiboOnChart();
 void EnsureFiboScanned();
 void DeleteFiboPending(const bool isBuy);
+int    TodayKey();
+string GVDayName();
+string GVStartEqName();
+string GVHaltName();
+datetime DayStartTime();
+void   EnsureDayState();
+int    CountPositionsOpenedToday();
+int    CountOpenSimultaneous();
+bool   WouldExceedDailyPositionLimit(const int extraPositions, string &reason);
+double GetAccountDailyPnL();
+double GetDailyPnLPercent();
+bool   IsHardStopActive();
+void   FlattenAccount();
+void   UpdateHardStopLabel();
+void   TriggerHardDailyStop(const double pnlPct);
+void   CheckHardDailyStop();
+bool   IsTradingBlocked(string &reason, const int extraPositions=1);
 
 //+------------------------------------------------------------------+
 //| Initialization                                                   |
@@ -199,7 +220,9 @@ int OnInit()
    for(int lv = 1; lv <= 5; lv++)
       g_fiboLvOn[lv] = true;
 
-   CreateDashboard(); 
+   EnsureDayState();
+   CreateDashboard();
+   CheckHardDailyStop(); 
 
    if(IsFiboOnChart())
    {
@@ -232,7 +255,8 @@ void OnDeinit(const int reason)
    ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrWhite);
 }
 
-void OnTick() { 
+void OnTick() {
+   CheckHardDailyStop();
    UpdateLiveClock();
    ApplyQuoteVisibility();
    CheckFiboCutProfit();
@@ -259,6 +283,7 @@ void OnTimer()
       quotesDrawn = true;
    }
    UpdateLiveClock();
+   CheckHardDailyStop();
    ChartRedraw();
 }
 
@@ -333,7 +358,8 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
                name != PREF+"Check1" &&
                name != PREF+"Check2" &&
                name != PREF+"Check3" &&
-               name != PREF+"Quote") { 
+               name != PREF+"Quote" &&
+               name != PREF+"HardStop") { 
                ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? GetInitialY(name) : UI_OFFSCREEN); 
             } 
          }
@@ -382,17 +408,16 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          else { ObjectsDeleteAll(0, ZONE_PREF); ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "Scan S&D"); ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrDarkGreen); }
          ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_STATE, false); 
       }
-      else if(sparam == PREF+"BtnBuyLMZ") { PlaceLmzOrders(true); ObjectSetInteger(0, PREF+"BtnBuyLMZ", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"BtnSellLMZ") { PlaceLmzOrders(false); ObjectSetInteger(0, PREF+"BtnSellLMZ", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnBuyLMZ") { PlaceRegimeOrders(true, true); ObjectSetInteger(0, PREF+"BtnBuyLMZ", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnSellLMZ") { PlaceRegimeOrders(false, true); ObjectSetInteger(0, PREF+"BtnSellLMZ", OBJPROP_STATE, false); }
       else if(StringFind(sparam, PREF+"ChkFiboLv") == 0) {
          int lv = (int)StringToInteger(StringSubstr(sparam, StringLen(PREF+"ChkFiboLv")));
          ToggleFiboLevel(lv);
          ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
       }
-      else if(sparam == PREF+"BtnBuyLFibo") { PlaceFiboBuyAll(); ObjectSetInteger(0, PREF+"BtnBuyLFibo", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"BtnSellLFibo") { PlaceFiboSellAll(); ObjectSetInteger(0, PREF+"BtnSellLFibo", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"BtnLim382") { PlaceFiboDirLimit(1); ObjectSetInteger(0, PREF+"BtnLim382", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"BtnLim50")  { PlaceFiboDirLimit(3); ObjectSetInteger(0, PREF+"BtnLim50", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnBuyLFibo") { PlaceRegimeOrders(true, false); ObjectSetInteger(0, PREF+"BtnBuyLFibo", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnSellLFibo") { PlaceRegimeOrders(false, false); ObjectSetInteger(0, PREF+"BtnSellLFibo", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnLim236") { PlaceFiboDirLimit(1); ObjectSetInteger(0, PREF+"BtnLim236", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BtnLim618") { PlaceFiboDirLimit(2); ObjectSetInteger(0, PREF+"BtnLim618", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BuyNow") { PlaceBuyNow(); ObjectSetInteger(0, PREF+"BuyNow", OBJPROP_STATE, false); }
       else if(sparam == PREF+"SellNow") { PlaceSellNow(); ObjectSetInteger(0, PREF+"SellNow", OBJPROP_STATE, false); }
@@ -791,6 +816,272 @@ double GetRiskBaseAmount()
    return AccountInfoDouble(ACCOUNT_BALANCE);
 }
 
+int TodayKey()
+{
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   return dt.year * 10000 + dt.mon * 100 + dt.day;
+}
+
+string GVDayName()     { return "SNDFC_DAY_" + IntegerToString(InpMagicNumber); }
+string GVStartEqName() { return "SNDFC_STARTEQ_" + IntegerToString(InpMagicNumber); }
+string GVHaltName()    { return "SNDFC_HALT_" + IntegerToString(InpMagicNumber); }
+
+datetime DayStartTime()
+{
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   dt.hour = 0;
+   dt.min  = 0;
+   dt.sec  = 0;
+   return StructToTime(dt);
+}
+
+void EnsureDayState()
+{
+   int today = TodayKey();
+   string dayName = GVDayName();
+   if(!GlobalVariableCheck(dayName) || (int)GlobalVariableGet(dayName) != today)
+   {
+      int haltDay = GlobalVariableCheck(GVHaltName()) ? (int)GlobalVariableGet(GVHaltName()) : 0;
+      GlobalVariableSet(dayName, (double)today);
+      GlobalVariableSet(GVStartEqName(), AccountInfoDouble(ACCOUNT_EQUITY));
+      if(haltDay != 0 && haltDay != today)
+      {
+         GlobalVariableSet(GVHaltName(), 0.0);
+         Print("Hard Daily Stop reset. Trading aktif lagi (hari baru server 00:00).");
+      }
+   }
+}
+
+int CountPositionsOpenedToday()
+{
+   datetime from = DayStartTime();
+   int count = 0;
+   if(!HistorySelect(from, TimeCurrent()))
+      return 0;
+
+   int total = HistoryDealsTotal();
+   for(int i = 0; i < total; i++)
+   {
+      ulong ticket = HistoryDealGetTicket(i);
+      if(ticket == 0) continue;
+      if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol) continue;
+      if((ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) != InpMagicNumber) continue;
+
+      long dtype = HistoryDealGetInteger(ticket, DEAL_TYPE);
+      if(dtype != DEAL_TYPE_BUY && dtype != DEAL_TYPE_SELL) continue;
+
+      long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+      if(entry != DEAL_ENTRY_IN && entry != DEAL_ENTRY_INOUT) continue;
+
+      count++;
+   }
+   return count;
+}
+
+int CountOpenSimultaneous()
+{
+   int n = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong t = PositionGetTicket(i);
+      if(!PositionSelectByTicket(t)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+      n++;
+   }
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      ulong t = OrderGetTicket(i);
+      if(!OrderSelect(t)) continue;
+      if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
+      if((ulong)OrderGetInteger(ORDER_MAGIC) != InpMagicNumber) continue;
+      n++;
+   }
+   return n;
+}
+
+bool WouldExceedDailyPositionLimit(const int extraPositions, string &reason)
+{
+   int extra = (extraPositions > 0) ? extraPositions : 1;
+
+   int trades = CountPositionsOpenedToday();
+   if(InpMaxTradesPerDay > 0 && (trades >= InpMaxTradesPerDay || trades + extra > InpMaxTradesPerDay))
+   {
+      reason = "Max trades per hari tercapai (" + IntegerToString(trades) + "/"
+             + IntegerToString(InpMaxTradesPerDay) + ", history hari ini)";
+      return true;
+   }
+
+   int openNow = CountOpenSimultaneous();
+   if(InpMaxOpenSimultaneous > 0 && (openNow >= InpMaxOpenSimultaneous || openNow + extra > InpMaxOpenSimultaneous))
+   {
+      reason = "Max open simultan tercapai (" + IntegerToString(openNow) + "/"
+             + IntegerToString(InpMaxOpenSimultaneous) + ")";
+      return true;
+   }
+   return false;
+}
+
+double GetAccountDailyPnL()
+{
+   datetime from = DayStartTime();
+   double pnl = 0.0;
+   if(HistorySelect(from, TimeCurrent()))
+   {
+      int total = HistoryDealsTotal();
+      for(int i = 0; i < total; i++)
+      {
+         ulong ticket = HistoryDealGetTicket(i);
+         if(ticket == 0) continue;
+         long dtype = HistoryDealGetInteger(ticket, DEAL_TYPE);
+         if(dtype != DEAL_TYPE_BUY && dtype != DEAL_TYPE_SELL) continue;
+         pnl += HistoryDealGetDouble(ticket, DEAL_PROFIT);
+         pnl += HistoryDealGetDouble(ticket, DEAL_SWAP);
+         pnl += HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+      }
+   }
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong t = PositionGetTicket(i);
+      if(!PositionSelectByTicket(t)) continue;
+      pnl += PositionGetDouble(POSITION_PROFIT);
+      pnl += PositionGetDouble(POSITION_SWAP);
+   }
+   return pnl;
+}
+
+double GetDailyPnLPercent()
+{
+   double pnl = GetAccountDailyPnL();
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double startEq = equity - pnl;
+   if(startEq <= 0.0)
+      startEq = GlobalVariableCheck(GVStartEqName()) ? GlobalVariableGet(GVStartEqName()) : equity;
+   if(startEq <= 0.0) return 0.0;
+   return pnl / startEq * 100.0;
+}
+
+bool IsHardStopActive()
+{
+   if(!InpHardDailyStop) return false;
+   EnsureDayState();
+   if(!GlobalVariableCheck(GVHaltName())) return false;
+   return ((int)GlobalVariableGet(GVHaltName()) == TodayKey());
+}
+
+void FlattenAccount()
+{
+   for(int pass = 0; pass < 3; pass++)
+   {
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+      {
+         ulong t = PositionGetTicket(i);
+         if(!PositionSelectByTicket(t)) continue;
+         if(!trade.PositionClose(t))
+            Print("Hard Daily Stop: gagal close posisi #", t, " ", trade.ResultRetcodeDescription());
+      }
+      for(int i = OrdersTotal() - 1; i >= 0; i--)
+      {
+         ulong t = OrderGetTicket(i);
+         if(!OrderSelect(t)) continue;
+         if(!trade.OrderDelete(t))
+            Print("Hard Daily Stop: gagal hapus order #", t, " ", trade.ResultRetcodeDescription());
+      }
+   }
+}
+
+void UpdateHardStopLabel()
+{
+   double pct = GetDailyPnLPercent();
+   string posTxt = "  |  trades " + IntegerToString(CountPositionsOpenedToday()) + "/"
+                 + IntegerToString(InpMaxTradesPerDay)
+                 + "  |  open " + IntegerToString(CountOpenSimultaneous()) + "/"
+                 + IntegerToString(InpMaxOpenSimultaneous);
+   string txt;
+   color clr;
+   if(IsHardStopActive())
+   {
+      txt = "HARD DAILY STOP " + DoubleToString(pct, 2) + "%  | OFF until 00:00 server" + posTxt;
+      clr = clrOrangeRed;
+   }
+   else
+   {
+      txt = "Daily PnL " + DoubleToString(pct, 2) + "%  (incl. floating)" + posTxt;
+      if((CountPositionsOpenedToday() >= InpMaxTradesPerDay && InpMaxTradesPerDay > 0) ||
+         (CountOpenSimultaneous() >= InpMaxOpenSimultaneous && InpMaxOpenSimultaneous > 0))
+         clr = clrOrangeRed;
+      else if(pct <= -InpMaxDailyLossPercent * 0.7) clr = clrOrange;
+      else if(pct < 0.0) clr = clrDarkOrange;
+      else clr = clrForestGreen;
+   }
+   DrawNativeLabel(PREF + "HardStop", txt, (PANEL_W + 20), 25, clr);
+}
+
+void TriggerHardDailyStop(const double pnlPct)
+{
+   bool firstTrigger = !IsHardStopActive();
+   GlobalVariableSet(GVHaltName(), (double)TodayKey());
+   FlattenAccount();
+   UpdateHardStopLabel();
+   if(firstTrigger)
+   {
+      string msg = "HARD DAILY STOP: Daily PnL (incl. floating) "
+                 + DoubleToString(pnlPct, 2) + "% <= -"
+                 + DoubleToString(InpMaxDailyLossPercent, 2)
+                 + "%. Semua posisi/order ditutup. Trading disable sampai 00:00 server.";
+      Print(msg);
+      Alert(msg);
+   }
+}
+
+void CheckHardDailyStop()
+{
+   EnsureDayState();
+   if(!InpHardDailyStop || InpMaxDailyLossPercent <= 0.0)
+   {
+      if(GlobalVariableCheck(GVHaltName()) && GlobalVariableGet(GVHaltName()) != 0.0)
+      {
+         GlobalVariableSet(GVHaltName(), 0.0);
+         Print("Hard Daily Stop OFF. Kunci harian dilepas, trading aktif lagi.");
+      }
+      UpdateHardStopLabel();
+      return;
+   }
+
+   if(IsHardStopActive())
+   {
+      if(PositionsTotal() > 0 || OrdersTotal() > 0)
+         FlattenAccount();
+      UpdateHardStopLabel();
+      return;
+   }
+
+   double pnlPct = GetDailyPnLPercent();
+   if(pnlPct <= -InpMaxDailyLossPercent)
+      TriggerHardDailyStop(pnlPct);
+   else
+      UpdateHardStopLabel();
+}
+
+bool IsTradingBlocked(string &reason, const int extraPositions)
+{
+   EnsureDayState();
+   CheckHardDailyStop();
+
+   if(InpHardDailyStop && IsHardStopActive())
+   {
+      reason = "Hard Daily Stop aktif sampai 00:00 server";
+      return true;
+   }
+
+   if(WouldExceedDailyPositionLimit(extraPositions, reason))
+      return true;
+   return false;
+}
+
 double CalcLotPerLayer(ENUM_ORDER_TYPE orderType, double entry, double sl, int layerCount, double riskPct)
 {
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
@@ -932,22 +1223,22 @@ void RefreshRiskDisplay()
 {
    if(g_fiboActive || IsFiboOnChart())
    {
-      double sl   = FiboChartPrice(InpFiboLevel5);
-      double e236 = FiboChartPrice(InpFiboLevel1);
+      double sl   = FiboChartPrice(InpFiboLevel6);
+      double e382 = FiboChartPrice(InpFiboLevel2);
       double e50  = FiboChartPrice(InpFiboLevel3);
-      if(e236 > 0.0 && e50 > 0.0 && sl > 0.0 && MathAbs(e236 - sl) > 0.0)
+      if(e382 > 0.0 && e50 > 0.0 && sl > 0.0 && MathAbs(e382 - sl) > 0.0)
       {
          int layers = (int)GetInputValue("InpLayers");
          if(layers < 1) layers = 1;
 
-         double buyLot1  = GetResolvedLot(ORDER_TYPE_BUY, e236, sl);
+         double buyLot1  = GetResolvedLot(ORDER_TYPE_BUY, e382, sl);
          double buyLot2  = GetResolvedLot(ORDER_TYPE_BUY, e50, sl);
-         double sellLot1 = GetResolvedLot(ORDER_TYPE_SELL, e236, sl);
+         double sellLot1 = GetResolvedLot(ORDER_TYPE_SELL, e382, sl);
          double sellLot2 = GetResolvedLot(ORDER_TYPE_SELL, e50, sl);
 
-         double buyRisk  = CalcRiskUSD(ORDER_TYPE_BUY, e236, sl, buyLot1, layers)
+         double buyRisk  = CalcRiskUSD(ORDER_TYPE_BUY, e382, sl, buyLot1, layers)
                          + CalcRiskUSD(ORDER_TYPE_BUY, e50, sl, buyLot2, layers);
-         double sellRisk = CalcRiskUSD(ORDER_TYPE_SELL, e236, sl, sellLot1, layers)
+         double sellRisk = CalcRiskUSD(ORDER_TYPE_SELL, e382, sl, sellLot1, layers)
                          + CalcRiskUSD(ORDER_TYPE_SELL, e50, sl, sellLot2, layers);
 
          if(ObjectFind(0, PREF+"Buy_Risk") >= 0)
@@ -976,34 +1267,56 @@ void RefreshRiskDisplay()
       ObjectSetString(0, PREF+"LblCalcLot", OBJPROP_TEXT, IsAutoLot ? "Risk $: scan / pilih fibo" : "");
 }
 
-void PlaceLmzOrders(const bool isBuy)
+void PlaceRegimeOrders(const bool isBuy, const bool isVolatile)
 {
+   string mode = isVolatile ? "Volatile" : "Choppy";
+   string side = isBuy ? "Buy L " : "Sell L ";
+   int layers = (int)GetInputValue("InpLayers");
+   if(layers < 1) layers = 1;
+   string blockReason = "";
+   if(IsTradingBlocked(blockReason, 2 * layers))
+   {
+      Print(side, mode, ": ", blockReason);
+      return;
+   }
+
    EnsureFiboScanned();
    if(!g_fiboActive)
    {
-      Print(isBuy ? "Buy LMZ" : "Sell LMZ", ": scan / pilih fibo dulu.");
+      Print(side, mode, ": scan / pilih fibo dulu.");
       return;
    }
 
    DeleteFiboPending(isBuy);
    ResetFiboCutProfit(true);
 
-   double sl    = FiboChartPrice(InpFiboLevel5);
-   double e236  = FiboChartPrice(InpFiboLevel1);
-   double tp236 = FiboChartPrice(InpFiboTarget);
-   double e50   = FiboChartPrice(InpFiboLevel3);
-   double tp50  = FiboChartPrice(0.0);
-   string tag   = isBuy ? "FiboBuy " : "FiboSell ";
+   // Layer A: 50 → TP 0.  Volatile SL 78.6 (kejar RR), Choppy SL 88.6 (anti sweep).
+   // Layer B: 38.2 → TP -27.2, SL 88.6.
+   double eA  = FiboChartPrice(InpFiboLevel3);
+   double tpA = FiboChartPrice(0.0);
+   double slA = FiboChartPrice(isVolatile ? InpFiboLevel5 : InpFiboLevel6);
+   double eB  = FiboChartPrice(InpFiboLevel2);
+   double tpB = FiboChartPrice(InpFiboTarget);
+   double slB = FiboChartPrice(InpFiboLevel6);
+   string tag = isBuy ? "FiboBuy " : "FiboSell ";
 
-   Print(isBuy ? "Buy LMZ" : "Sell LMZ",
-         ": entry ", DoubleToString(InpFiboLevel1, 1), " TP ", DoubleToString(InpFiboTarget, 1),
-         " + entry ", DoubleToString(InpFiboLevel3, 1), " TP 0.0, SL ",
-         DoubleToString(InpFiboLevel5, 1));
-   PlaceLimitOrder(isBuy, e236, sl, tp236, tag + DoubleToString(InpFiboLevel1, 1));
-   PlaceLimitOrder(isBuy, e50, sl, tp50, tag + DoubleToString(InpFiboLevel3, 1));
+   Print(side, mode,
+         ": A ", DoubleToString(InpFiboLevel3, 1), " SL ",
+         DoubleToString(isVolatile ? InpFiboLevel5 : InpFiboLevel6, 1), " TP 0.0 + B ",
+         DoubleToString(InpFiboLevel2, 1), " SL ", DoubleToString(InpFiboLevel6, 1),
+         " TP ", DoubleToString(InpFiboTarget, 1));
+   PlaceLimitOrder(isBuy, eA, slA, tpA, tag + DoubleToString(InpFiboLevel3, 1));
+   PlaceLimitOrder(isBuy, eB, slB, tpB, tag + DoubleToString(InpFiboLevel2, 1));
 }
 
 void PlaceBuyNow() {
+   string blockReason = "";
+   if(IsTradingBlocked(blockReason))
+   {
+      Print("Buy Now: ", blockReason);
+      return;
+   }
+
    double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double sl = GetInputValue("Buy_Stoploss");
    double tp = 0.0;
@@ -1034,12 +1347,20 @@ void PlaceBuyNow() {
    tp = NormalizeDouble(tp, _Digits);
    UpdateInput("Buy_TP1", tp);
    if(trade.Buy(lot, _Symbol, 0, sl, tp, "BuyNow"))
-      Print("Buy Now: Lot=", lot, ", SL=", sl, ", TP=", tp);
+      Print("Buy Now: Lot=", lot, ", SL=", sl, ", TP=", tp,
+            " | posisi hari ini ", CountPositionsOpenedToday(), "/", InpMaxTradesPerDay);
    else
       Print("Failed to execute Buy order. Error: ", GetLastError());
 }
 
 void PlaceSellNow() {
+   string blockReason = "";
+   if(IsTradingBlocked(blockReason))
+   {
+      Print("Sell Now: ", blockReason);
+      return;
+   }
+
    double entry = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double sl = GetInputValue("Sell_Stoploss");
    double tp = 0.0;
@@ -1072,7 +1393,8 @@ void PlaceSellNow() {
    tp = NormalizeDouble(tp, _Digits);
    UpdateInput("Sell_TP1", tp);
    if(trade.Sell(lot, _Symbol, 0, sl, tp, "SellNow"))
-      Print("Sell Now: Lot=", lot, ", SL=", sl, ", TP=", tp);
+      Print("Sell Now: Lot=", lot, ", SL=", sl, ", TP=", tp,
+            " | posisi hari ini ", CountPositionsOpenedToday(), "/", InpMaxTradesPerDay);
    else
       Print("Failed to execute Sell order. Error: ", GetLastError());
 }
@@ -1163,15 +1485,14 @@ void CreateDashboard() {
    CreateButton("BtnPickFibo", 175, UI_Y + 128, 150, 30, "Pilih Candle", clrDarkOrange, clrWhite);
    CreateButton("BtnPickZzSeg", 330, UI_Y + 128, 150, 30, "Pilih ZZ", clrMediumPurple, clrWhite);
    CreateFiboLevelToggles();
-   CreateButton("BtnBuyLFibo", 20, UI_Y + 204, 200, 30, "Buy L Fibo", clrDodgerBlue, clrWhite);
-   CreateButton("BtnSellLFibo", 270, UI_Y + 204, 200, 30, "Sell L Fibo", clrOrangeRed, clrWhite);
-   CreateButton("BtnBuyLMZ", 20, UI_Y + 244, 200, 30, "Buy LMZ", clrBlue, clrWhite);
-   CreateButton("BtnSellLMZ", 270, UI_Y + 244, 200, 30, "Sell LMZ", clrOrange, clrWhite);
+   CreateButton("BtnBuyLFibo", 20, UI_Y + 204, 200, 30, "Buy L Choppy", clrDodgerBlue, clrWhite);
+   CreateButton("BtnSellLFibo", 270, UI_Y + 204, 200, 30, "Sell L Choppy", clrOrangeRed, clrWhite);
+   CreateButton("BtnBuyLMZ", 20, UI_Y + 244, 200, 30, "Buy L Volatile", clrBlue, clrWhite);
+   CreateButton("BtnSellLMZ", 270, UI_Y + 244, 200, 30, "Sell L Volatile", clrOrange, clrWhite);
    CreateButton("DelBuy", 20, UI_Y + 284, 200, 30, "Del Buy", clrBlue, clrWhite);
    CreateButton("DelSell", 270, UI_Y + 284, 200, 30, "Del Sell", clrBrown, clrWhite);
-   CreateButton("BtnLim382", 20, UI_Y + 324, 150, 30, "Limit 38.2", clrDodgerBlue, clrWhite);
-   CreateButton("BtnLim50", 175, UI_Y + 324, 150, 30, "Limit 50", clrTeal, clrWhite);
-   CreateButton("BtnLim618", 330, UI_Y + 324, 150, 30, "Limit 61.8", clrOrangeRed, clrWhite);
+   CreateButton("BtnLim236", 20, UI_Y + 324, 200, 30, "Limit 23.6", clrDodgerBlue, clrWhite);
+   CreateButton("BtnLim618", 270, UI_Y + 324, 200, 30, "Limit 61.8", clrOrangeRed, clrWhite);
    CreateButton("ClosePos", 20, UI_Y + 364, 200, 30, "Close Positions", clrDarkRed, clrWhite);
    CreateButton("CloseOrd", 270, UI_Y + 364, 200, 30, "Close Orders", clrMaroon, clrWhite);
    CreateButton("BuyNow", 20, UI_Y + 404, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
@@ -1187,8 +1508,7 @@ void CreateDashboard() {
       ObjectSetInteger(0, PREF+"ChkFiboLv"+IntegerToString(lv), OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"BtnBuyLMZ", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"BtnSellLMZ", OBJPROP_ZORDER, 10);
-   ObjectSetInteger(0, PREF+"BtnLim382", OBJPROP_ZORDER, 10);
-   ObjectSetInteger(0, PREF+"BtnLim50", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, PREF+"BtnLim236", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"BtnLim618", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, "DelBuy", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
    ObjectSetInteger(0, "DelSell", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
@@ -1843,6 +2163,14 @@ void PlaceLimitOrder(const bool isBuy, const double entry, const double sl, cons
    int layers = (int)GetInputValue("InpLayers");
    if(layers < 1) layers = 1;
 
+   string blockReason = "";
+   if(IsTradingBlocked(blockReason, layers))
+   {
+      Print(comment, ": ", blockReason);
+      return;
+   }
+   if(layers < 1) layers = 1;
+
    double nEntry = NormalizeDouble(entry, _Digits);
    double nSL    = NormalizeDouble(sl, _Digits);
    double nTP    = NormalizeDouble(tp, _Digits);
@@ -1922,6 +2250,15 @@ void PlaceLimitOrder(const bool isBuy, const double entry, const double sl, cons
 
 void PlaceFiboBuyLimit(const int levelIdx)
 {
+   int layers = (int)GetInputValue("InpLayers");
+   if(layers < 1) layers = 1;
+   string blockReason = "";
+   if(IsTradingBlocked(blockReason, layers))
+   {
+      Print("FiboBuy: ", blockReason);
+      return;
+   }
+
    if(!g_fiboActive)
    {
       Print("Klik Scan Fibo Candle dulu.");
@@ -1974,6 +2311,15 @@ void PlaceFiboBuyLimit(const int levelIdx)
 
 void PlaceFiboSellLimit(const int levelIdx)
 {
+   int layers = (int)GetInputValue("InpLayers");
+   if(layers < 1) layers = 1;
+   string blockReason = "";
+   if(IsTradingBlocked(blockReason, layers))
+   {
+      Print("FiboSell: ", blockReason);
+      return;
+   }
+
    if(!g_fiboActive)
    {
       Print("Klik Scan Fibo Candle dulu.");
@@ -2026,6 +2372,19 @@ void PlaceFiboSellLimit(const int levelIdx)
 
 void PlaceFiboBuyAll()
 {
+   int layers = (int)GetInputValue("InpLayers");
+   if(layers < 1) layers = 1;
+   int selected = 0;
+   for(int lv = 1; lv <= 5; lv++)
+      if(IsFiboLevelSelected(lv)) selected++;
+
+   string blockReason = "";
+   if(IsTradingBlocked(blockReason, selected * layers))
+   {
+      Print("Buy L Fibo: ", blockReason);
+      return;
+   }
+
    EnsureFiboScanned();
    if(!g_fiboActive)
    {
@@ -2050,11 +2409,25 @@ void PlaceFiboBuyAll()
    if(placed == 0)
       Print("Buy L Fibo: pilih minimal 1 level fibo di dashboard.");
    else
-      Print("Buy L Fibo: order level ", sel);
+      Print("Buy L Fibo: order level ", sel,
+            " | posisi hari ini ", CountPositionsOpenedToday(), "/", InpMaxTradesPerDay);
 }
 
 void PlaceFiboSellAll()
 {
+   int layers = (int)GetInputValue("InpLayers");
+   if(layers < 1) layers = 1;
+   int selected = 0;
+   for(int lv = 1; lv <= 5; lv++)
+      if(IsFiboLevelSelected(lv)) selected++;
+
+   string blockReason = "";
+   if(IsTradingBlocked(blockReason, selected * layers))
+   {
+      Print("Sell L Fibo: ", blockReason);
+      return;
+   }
+
    EnsureFiboScanned();
    if(!g_fiboActive)
    {
@@ -2079,11 +2452,21 @@ void PlaceFiboSellAll()
    if(placed == 0)
       Print("Sell L Fibo: pilih minimal 1 level fibo di dashboard.");
    else
-      Print("Sell L Fibo: order level ", sel);
+      Print("Sell L Fibo: order level ", sel,
+            " | posisi hari ini ", CountPositionsOpenedToday(), "/", InpMaxTradesPerDay);
 }
 
 void PlaceFiboDirLimit(const int kind)
 {
+   int layers = (int)GetInputValue("InpLayers");
+   if(layers < 1) layers = 1;
+   string blockReason = "";
+   if(IsTradingBlocked(blockReason, layers))
+   {
+      Print("Limit Fibo: ", blockReason);
+      return;
+   }
+
    EnsureFiboScanned();
    if(!g_fiboActive)
    {
@@ -2098,20 +2481,14 @@ void PlaceFiboDirLimit(const int kind)
    double tpLv    = 0.0;
    if(kind == 1)
    {
-      entryLv = InpFiboLevel2;
-      slLv    = InpFiboLevel3;
-      tpLv    = 0.0;
-   }
-   else if(kind == 3)
-   {
-      entryLv = InpFiboLevel3;
-      slLv    = InpFiboLevel5;
-      tpLv    = 0.0;
+      entryLv = InpFiboLevel1;
+      slLv    = InpFiboLevel4;
+      tpLv    = InpFiboTarget;
    }
    else
    {
       entryLv = InpFiboLevel4;
-      slLv    = InpFiboLevel5;
+      slLv    = InpFiboLevel6;
       tpLv    = InpFiboLevel1;
    }
 
@@ -2560,6 +2937,7 @@ int GetInitialY(string name) {
    if(name == PREF+"HideQuote") return HEADER_Y + 7;
    if(name == PREF+"Title") return HEADER_Y + 20;
    if(name == PREF+"Live_Clock") return 50;
+   if(name == PREF+"HardStop") return 25;
    if(name == PREF+"Check1") return 75;
    if(name == PREF+"Check2") return 100;
    if(name == PREF+"Check3") return 125;
@@ -2576,7 +2954,7 @@ int GetInitialY(string name) {
    if(name == PREF+"BtnBuyLFibo" || name == PREF+"BtnSellLFibo") return UI_Y + 204;
    if(name == PREF+"BtnBuyLMZ" || name == PREF+"BtnSellLMZ") return UI_Y + 244;
    if(name == PREF+"DelBuy" || name == PREF+"DelSell") return UI_Y + 284;
-   if(name == PREF+"BtnLim382" || name == PREF+"BtnLim50" || name == PREF+"BtnLim618") return UI_Y + 324;
+   if(name == PREF+"BtnLim236" || name == PREF+"BtnLim618") return UI_Y + 324;
    if(name == PREF+"ClosePos" || name == PREF+"CloseOrd") return UI_Y + 364;
    if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 404;
    if(name == PREF+"Reset" || name == PREF+"GetNews") return UI_Y + 444;

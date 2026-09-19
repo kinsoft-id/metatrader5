@@ -31,7 +31,14 @@ enum ENUM_LOT_MODE
 
 input group "--- RISK & TRANSMISSION ---"
 input ENUM_LOT_MODE InpLotMode     = LOT_AUTO_RISK; // Mode lot
-input double        InpRiskPercent = 1.0;        // Risk % auto (default 1, max 1%)
+input double        InpRiskPerSetup = 0.12;      // Risk % per setup (bukan per trade)
+input double        InpSplitLot1    = 50.0;      // Split S&D order 1 %
+input double        InpSplitLot2    = 30.0;      // Split S&D order 2 %
+input double        InpSplitLot3    = 20.0;      // Split S&D order 3 %
+input int           InpMaxTradesPerDay = 24;     // Max trades per hari (dari history)
+input int           InpMaxOpenSimultaneous = 5;  // Max posisi/order terbuka bersamaan
+input bool          InpHardDailyStop = true;     // Hard Daily Stop (close semua + disable)
+input double        InpMaxDailyLossPercent = 2.0; // Hard stop jika Daily PnL+floating <= -%
 input ulong InpMagicNumber = 1111; // Magic Number (Harus beda tiap chart)
 
 
@@ -45,7 +52,7 @@ bool IsQuoteVisible = true;
 bool IsSDScanning = false;
 bool IsAutoLot = true;
 double g_lastManualLot = 0.01;
-double g_lastRiskPct = 1.0;
+double g_lastRiskPct = 0.12;
 int UI_Y = 100;      
 int HEADER_Y = 50;   
 int PANEL_W = 500;   
@@ -87,8 +94,43 @@ void UpdateLotRiskDisplay(double bEntry, double bSL, double sEntry, double sSL);
 double CalcRiskUSD(ENUM_ORDER_TYPE orderType, double entry, double sl, double lot, int layers);
 double NormalizeLot(double lot);
 double GetRiskBaseAmount();
-double CalcLotPerLayer(ENUM_ORDER_TYPE orderType, double entry, double sl, int layerCount, double riskPct);
+int    GetLayerCount();
+double GetSplitWeight(int layerIndex, int layerCount);
+double CalcLotPerSetup(ENUM_ORDER_TYPE orderType, double entry, double sl, double riskPct);
 double GetResolvedLot(ENUM_ORDER_TYPE orderType, double entry, double sl);
+double GetLayerLot(ENUM_ORDER_TYPE orderType, double entry, double sl, int layerIndex);
+string FormatLayerLots(ENUM_ORDER_TYPE orderType, double entry, double sl);
+double CalcSetupRiskUSD(ENUM_ORDER_TYPE orderType, double entry, double sl);
+int    TodayKey();
+string GVDayName();
+string GVStartEqName();
+void   EnsureDayState();
+int    CountPositionsOpenedToday();
+int    CountOpenSimultaneous();
+bool   WouldExceedDailyPositionLimit(const int extraPositions, string &reason);
+double GetEADailyPnL();
+double GetAccountDailyPnL();
+double GetDailyPnLPercent();
+datetime DayStartTime();
+string GVHaltName();
+bool   IsHardStopActive();
+void   FlattenAccount();
+void   TriggerHardDailyStop(const double pnlPct);
+void   CheckHardDailyStop();
+void   UpdateHardStopLabel();
+bool   IsTradingBlocked(string &reason, const int extraPositions = 0);
+void   ActionDrawLine();
+void   ActionScanSD();
+void   ActionBuyOrder();
+void   ActionSellOrder();
+void   ActionDelBuy();
+void   ActionDelSell();
+void   ActionClosePositions();
+void   ActionCloseOrders();
+void   ActionGetNews();
+void   ActionReset();
+bool   HotkeyModifiersFree();
+void   HandleHotkey(const long key);
 
 //+------------------------------------------------------------------+
 //| Initialization                                                   |
@@ -100,7 +142,8 @@ int OnInit()
    ZONE_PREF = "SNDQR_Z_" + IntegerToString(InpMagicNumber) + "_";
 
    IsAutoLot = (InpLotMode == LOT_AUTO_RISK);
-   g_lastRiskPct = (InpRiskPercent > 0.0) ? InpRiskPercent : 1.0;
+   g_lastRiskPct = (InpRiskPerSetup > 0.0) ? InpRiskPerSetup : 0.12;
+   EnsureDayState();
    
    // Mengatur agar setiap kali EA ini mengirim order, Magic Number langsung terpasang otomatis
    trade.SetExpertMagicNumber(InpMagicNumber);
@@ -109,6 +152,7 @@ int OnInit()
    ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, clrWhite);
    ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, clrBlack);
    CreateDashboard(); 
+   CheckHardDailyStop(); 
 
    // --- KUNCI: Aktifkan timer 1 detik untuk detak jam ---
    // --- WAJIB DI PALING BAWAH SEBELUM RETURN ---
@@ -130,6 +174,7 @@ void OnDeinit(const int reason)
 }
 
 void OnTick() { 
+   CheckHardDailyStop();
    UpdateLiveClock();
    ApplyQuoteVisibility();
 
@@ -154,6 +199,7 @@ void OnTimer()
       quotesDrawn = true;
    }
    UpdateLiveClock();
+   CheckHardDailyStop();
    ChartRedraw();
 }
 
@@ -184,11 +230,95 @@ void UpdateLiveClock()
    DrawNativeLabel(PREF + "Live_Clock", txt, (PANEL_W + 20), 50, clr);
 }
 
+void ActionDrawLine()
+{
+   CreateDrawingLines();
+   CalculateAndDrawAll();
+}
+
+void ActionScanSD()
+{
+   IsSDScanning = !IsSDScanning;
+   if(IsSDScanning)
+   {
+      ScanSD();
+      ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "S&D: ON [A]");
+      ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrGreen);
+   }
+   else
+   {
+      ObjectsDeleteAll(0, ZONE_PREF);
+      ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "Scan S&D [A]");
+      ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrDarkGreen);
+   }
+}
+
+void ActionBuyOrder()     { PlaceBuyOrder(); }
+void ActionSellOrder()    { PlaceSellOrder(); }
+void ActionDelBuy()
+{
+   DelPO(ORDER_TYPE_BUY_LIMIT);
+   DelPO(ORDER_TYPE_BUY_STOP);
+}
+void ActionDelSell()
+{
+   DelPO(ORDER_TYPE_SELL_LIMIT);
+   DelPO(ORDER_TYPE_SELL_STOP);
+}
+void ActionClosePositions() { CloseAllPositions(); }
+void ActionCloseOrders()    { CloseAllOrders(); }
+void ActionGetNews()        { GetHighImpactUSDNews(); }
+void ActionReset()
+{
+   ObjectsDeleteAll(0, PREF+"Line_");
+   ObjectsDeleteAll(0, PREF+"Calc_");
+   ObjectsDeleteAll(0, PREF+"Layer_");
+   ObjectsDeleteAll(0, ZONE_PREF);
+   IsSDScanning = false;
+   ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "Scan S&D [A]");
+   ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrDarkGreen);
+   if(IsAutoLot && ObjectFind(0, PREF+"LblCalcLot") >= 0)
+      ObjectSetString(0, PREF+"LblCalcLot", OBJPROP_TEXT, "Lot setup: (draw line)");
+   ChartRedraw();
+}
+
+bool HotkeyModifiersFree()
+{
+   return ((TerminalInfoInteger(TERMINAL_KEYSTATE_CONTROL) & 0x8000) == 0 &&
+           (TerminalInfoInteger(TERMINAL_KEYSTATE_MENU) & 0x8000) == 0 &&
+           (TerminalInfoInteger(TERMINAL_KEYSTATE_SHIFT) & 0x8000) == 0);
+}
+
+void HandleHotkey(const long key)
+{
+   if(!HotkeyModifiersFree()) return;
+
+   if(key == 68) ActionDrawLine();           // D
+   else if(key == 65) ActionScanSD();        // A
+   else if(key == 66) ActionBuyOrder();      // B
+   else if(key == 83) ActionSellOrder();     // S
+   else if(key == 81) ActionDelBuy();        // Q
+   else if(key == 87) ActionDelSell();       // W
+   else if(key == 80) ActionClosePositions(); // P
+   else if(key == 79) ActionCloseOrders();   // O
+   else if(key == 78) ActionGetNews();       // N
+   else if(key == 82) ActionReset();         // R
+   else return;
+
+   ChartRedraw();
+}
+
 //+------------------------------------------------------------------+
 //| Event Handling                                                   |
 //+------------------------------------------------------------------+
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
+   if(id == CHARTEVENT_KEYDOWN)
+   {
+      HandleHotkey(lparam);
+      return;
+   }
+
    if(id == CHARTEVENT_OBJECT_DRAG) { 
       if(sparam == PREF+"Line_Floor" || sparam == PREF+"Line_Ceiling") CalculateAndDrawAll(); 
       ChartRedraw(); 
@@ -205,6 +335,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
                name != PREF+"Hide" &&
                name != PREF+"HideQuote" &&
                name != PREF+"Live_Clock" &&
+               name != PREF+"HardStop" &&
                name != PREF+"Skor1" &&
                name != PREF+"Skor2" &&
                name != PREF+"Quote1" &&
@@ -234,39 +365,27 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_STATE, false);
          ChartRedraw();
       }
-      else if(sparam == PREF+"BtnDraw") { CreateDrawingLines(); CalculateAndDrawAll(); ObjectSetInteger(0, PREF+"BtnDraw", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"BtnScanSD") { 
-         IsSDScanning = !IsSDScanning;
-         if(IsSDScanning) { ScanSD(); ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "S&D: ON"); ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrGreen); } 
-         else { ObjectsDeleteAll(0, ZONE_PREF); ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "Scan S&D"); ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrDarkGreen); }
-         ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_STATE, false); 
+      else if(sparam == PREF+"BtnDraw") { ActionDrawLine(); ObjectSetInteger(0, PREF+"BtnDraw", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnScanSD") {
+         ActionScanSD();
+         ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_STATE, false);
       }
-      else if(sparam == PREF+"BtnBuyL") { PlaceBuyOrder(); ObjectSetInteger(0, PREF+"BtnBuyL", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"BtnSellL") { PlaceSellOrder(); ObjectSetInteger(0, PREF+"BtnSellL", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnBuyL") { ActionBuyOrder(); ObjectSetInteger(0, PREF+"BtnBuyL", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnSellL") { ActionSellOrder(); ObjectSetInteger(0, PREF+"BtnSellL", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BuyNow") { PlaceBuyNow(); ObjectSetInteger(0, PREF+"BuyNow", OBJPROP_STATE, false); }
       else if(sparam == PREF+"SellNow") { PlaceSellNow(); ObjectSetInteger(0, PREF+"SellNow", OBJPROP_STATE, false); }
       else if(sparam == PREF+"DelBuy") {
-         DelPO(ORDER_TYPE_BUY_LIMIT);
-         DelPO(ORDER_TYPE_BUY_STOP);
+         ActionDelBuy();
          ObjectSetInteger(0, PREF+"DelBuy", OBJPROP_STATE, false);
       }
       else if(sparam == PREF+"DelSell") {
-         DelPO(ORDER_TYPE_SELL_LIMIT);
-         DelPO(ORDER_TYPE_SELL_STOP);
+         ActionDelSell();
          ObjectSetInteger(0, PREF+"DelSell", OBJPROP_STATE, false);
       }
-      else if(sparam == PREF+"ClosePos") { CloseAllPositions(); ObjectSetInteger(0, PREF+"ClosePos", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"CloseOrd") { CloseAllOrders(); ObjectSetInteger(0, PREF+"CloseOrd", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"GetNews") { GetHighImpactUSDNews(); ObjectSetInteger(0, PREF+"GetNews", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"Reset") { 
-         ObjectsDeleteAll(0, PREF+"Line_"); ObjectsDeleteAll(0, PREF+"Calc_"); ObjectsDeleteAll(0, PREF+"Layer_"); ObjectsDeleteAll(0, ZONE_PREF); 
-         IsSDScanning = false; 
-         ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "Scan S&D"); ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrDarkGreen);
-         if(IsAutoLot && ObjectFind(0, PREF+"LblCalcLot") >= 0)
-            ObjectSetString(0, PREF+"LblCalcLot", OBJPROP_TEXT, "Lot/layer: (draw line)");
-         ChartRedraw(); 
-         ObjectSetInteger(0, PREF+"Reset", OBJPROP_STATE, false); 
-      }
+      else if(sparam == PREF+"ClosePos") { ActionClosePositions(); ObjectSetInteger(0, PREF+"ClosePos", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"CloseOrd") { ActionCloseOrders(); ObjectSetInteger(0, PREF+"CloseOrd", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"GetNews") { ActionGetNews(); ObjectSetInteger(0, PREF+"GetNews", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"Reset") { ActionReset(); ObjectSetInteger(0, PREF+"Reset", OBJPROP_STATE, false); }
       // --- DETEKSI KLIK TOMBOL BULAT S&D ---
       else if(StringFind(sparam, ZONE_PREF + "BTN_") == 0) {
          if(ObjectFind(0, PREF+"Line_Floor") < 0 || ObjectFind(0, PREF+"Line_Ceiling") < 0) {
@@ -509,10 +628,10 @@ void ScanSD() {
             // Jika area sudah tertembus total (Broken Zone), lewati dan jangan digambar
             if(isFullMitigated) continue; 
             
-            // --- MENENTUKAN TEKS LABEL BERDASARKAN SENTUHAN ---
-            string labelText = "  ● Fresh";
+            // --- MENENTUKAN TEKS LABEL BERDASARKAN SENTUHAN + TIPE ZONA ---
+            string labelText = "  ● Fresh " + type;
             if(touchCount > 0) {
-               labelText = "  ● Tested " + IntegerToString(touchCount) + "x";
+               labelText = "  ● Tested " + type + " " + IntegerToString(touchCount) + "x";
             }
             
             datetime startTime = iTime(_Symbol, _Period, i);
@@ -532,7 +651,7 @@ void ScanSD() {
                double btnPrice = legOutUp ? baseLow : baseHigh; 
                
                ObjectCreate(0, btnName, OBJ_TEXT, 0, endTime, btnPrice);
-               ObjectSetString(0, btnName, OBJPROP_TEXT, labelText); // Menampilkan "Fresh" atau "Tested 1x, 2x, dst"
+               ObjectSetString(0, btnName, OBJPROP_TEXT, labelText); // Fresh RBR/DBD atau Tested RBD/DBR Nx
                ObjectSetString(0, btnName, OBJPROP_FONT, "Arial Bold");
                ObjectSetInteger(0, btnName, OBJPROP_FONTSIZE, 9); // Ukuran teks sedikit diperkecil agar pas di layar
                
@@ -616,20 +735,47 @@ double NormalizeLot(double lot)
 
 double GetRiskBaseAmount()
 {
-   return AccountInfoDouble(ACCOUNT_BALANCE);
+   return AccountInfoDouble(ACCOUNT_EQUITY);
 }
 
-double CalcLotPerLayer(ENUM_ORDER_TYPE orderType, double entry, double sl, int layerCount, double riskPct)
+int GetLayerCount()
+{
+   int layers = (int)GetInputValue("InpLayers");
+   if(layers < 1) layers = 1;
+   if(layers > 3) layers = 3;
+   return layers;
+}
+
+double GetSplitWeight(int layerIndex, int layerCount)
+{
+   if(layerCount <= 1)
+      return (layerIndex == 0) ? 1.0 : 0.0;
+
+   if(layerCount == 2)
+      return (layerIndex == 0 || layerIndex == 1) ? 0.5 : 0.0;
+
+   double w1 = (InpSplitLot1 > 0.0) ? InpSplitLot1 : 0.0;
+   double w2 = (InpSplitLot2 > 0.0) ? InpSplitLot2 : 0.0;
+   double w3 = (InpSplitLot3 > 0.0) ? InpSplitLot3 : 0.0;
+   double sum3 = w1 + w2 + w3;
+   if(sum3 <= 0.0) sum3 = 100.0;
+
+   if(layerIndex == 0) return w1 / sum3;
+   if(layerIndex == 1) return w2 / sum3;
+   if(layerIndex == 2) return w3 / sum3;
+   return 0.0;
+}
+
+double CalcLotPerSetup(ENUM_ORDER_TYPE orderType, double entry, double sl, double riskPct)
 {
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   if(layerCount <= 0 || entry <= 0.0 || sl <= 0.0 || MathAbs(entry - sl) <= 0.0)
+   if(entry <= 0.0 || sl <= 0.0 || MathAbs(entry - sl) <= 0.0)
       return NormalizeLot(minLot);
 
    double base = GetRiskBaseAmount();
    if(base <= 0.0) return NormalizeLot(minLot);
 
    double totalRiskMoney = base * riskPct / 100.0;
-   double riskPerLayer   = totalRiskMoney / (double)layerCount;
 
    double profit = 0.0;
    if(!OrderCalcProfit(orderType, _Symbol, 1.0, entry, sl, profit))
@@ -641,14 +787,11 @@ double CalcLotPerLayer(ENUM_ORDER_TYPE orderType, double entry, double sl, int l
    double lossPerLot = MathAbs(profit);
    if(lossPerLot <= 0.0) return NormalizeLot(minLot);
 
-   return NormalizeLot(riskPerLayer / lossPerLot);
+   return NormalizeLot(totalRiskMoney / lossPerLot);
 }
 
 double GetResolvedLot(ENUM_ORDER_TYPE orderType, double entry, double sl)
 {
-   int layers = (int)GetInputValue("InpLayers");
-   if(layers < 1) layers = 1;
-
    if(!IsAutoLot)
    {
       double lot = GetInputValue("InpLot");
@@ -657,17 +800,345 @@ double GetResolvedLot(ENUM_ORDER_TYPE orderType, double entry, double sl)
    }
 
    double riskPct = GetInputValue("InpLot");
-   if(riskPct <= 0.0) riskPct = (InpRiskPercent > 0.0) ? InpRiskPercent : 1.0;
+   if(riskPct <= 0.0) riskPct = (InpRiskPerSetup > 0.0) ? InpRiskPerSetup : 0.12;
 
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   // Risk di atas 1% → lot terkecil
    if(riskPct > 1.0)
    {
       Print("Risk ", DoubleToString(riskPct, 2), "% > 1%. Memakai lot terkecil ", minLot);
       return NormalizeLot(minLot);
    }
 
-   return CalcLotPerLayer(orderType, entry, sl, layers, riskPct);
+   return CalcLotPerSetup(orderType, entry, sl, riskPct);
+}
+
+double GetLayerLot(ENUM_ORDER_TYPE orderType, double entry, double sl, int layerIndex)
+{
+   double setupLot = GetResolvedLot(orderType, entry, sl);
+   if(setupLot <= 0.0) return 0.0;
+   double w = GetSplitWeight(layerIndex, GetLayerCount());
+   if(w <= 0.0) return 0.0;
+   return NormalizeLot(setupLot * w);
+}
+
+string FormatLayerLots(ENUM_ORDER_TYPE orderType, double entry, double sl)
+{
+   int n = GetLayerCount();
+   string s = "";
+   for(int i = 0; i < n; i++)
+   {
+      if(i > 0) s += "/";
+      s += DoubleToString(GetLayerLot(orderType, entry, sl, i), 2);
+   }
+   return s;
+}
+
+double CalcSetupRiskUSD(ENUM_ORDER_TYPE orderType, double entry, double sl)
+{
+   int n = GetLayerCount();
+   double total = 0.0;
+   for(int i = 0; i < n; i++)
+      total += CalcRiskUSD(orderType, entry, sl, GetLayerLot(orderType, entry, sl, i), 1);
+   return total;
+}
+
+int TodayKey()
+{
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   return dt.year * 10000 + dt.mon * 100 + dt.day;
+}
+
+string GVDayName()     { return "SNDQR_DAY_" + IntegerToString(InpMagicNumber); }
+string GVStartEqName() { return "SNDQR_STARTEQ_" + IntegerToString(InpMagicNumber); }
+string GVHaltName()    { return "SNDQR_HALT_" + IntegerToString(InpMagicNumber); }
+
+datetime DayStartTime()
+{
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   dt.hour = 0;
+   dt.min  = 0;
+   dt.sec  = 0;
+   return StructToTime(dt);
+}
+
+void EnsureDayState()
+{
+   int today = TodayKey();
+   string dayName = GVDayName();
+   if(!GlobalVariableCheck(dayName) || (int)GlobalVariableGet(dayName) != today)
+   {
+      int haltDay = GlobalVariableCheck(GVHaltName()) ? (int)GlobalVariableGet(GVHaltName()) : 0;
+      GlobalVariableSet(dayName, (double)today);
+      GlobalVariableSet(GVStartEqName(), AccountInfoDouble(ACCOUNT_EQUITY));
+      if(haltDay != 0 && haltDay != today)
+      {
+         GlobalVariableSet(GVHaltName(), 0.0);
+         Print("Hard Daily Stop reset. Trading aktif lagi (hari baru server 00:00).");
+      }
+   }
+}
+
+int CountPositionsOpenedToday()
+{
+   datetime from = DayStartTime();
+   int count = 0;
+   if(!HistorySelect(from, TimeCurrent()))
+      return 0;
+
+   int total = HistoryDealsTotal();
+   for(int i = 0; i < total; i++)
+   {
+      ulong ticket = HistoryDealGetTicket(i);
+      if(ticket == 0) continue;
+      if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol) continue;
+      if((ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) != InpMagicNumber) continue;
+
+      long dtype = HistoryDealGetInteger(ticket, DEAL_TYPE);
+      if(dtype != DEAL_TYPE_BUY && dtype != DEAL_TYPE_SELL) continue;
+
+      long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+      if(entry != DEAL_ENTRY_IN && entry != DEAL_ENTRY_INOUT) continue;
+
+      count++;
+   }
+   return count;
+}
+
+int CountOpenSimultaneous()
+{
+   int n = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong t = PositionGetTicket(i);
+      if(!PositionSelectByTicket(t)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+      n++;
+   }
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      ulong t = OrderGetTicket(i);
+      if(!OrderSelect(t)) continue;
+      if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
+      if((ulong)OrderGetInteger(ORDER_MAGIC) != InpMagicNumber) continue;
+      n++;
+   }
+   return n;
+}
+
+bool WouldExceedDailyPositionLimit(const int extraPositions, string &reason)
+{
+   int extra = (extraPositions > 0) ? extraPositions : 1;
+
+   int trades = CountPositionsOpenedToday();
+   if(InpMaxTradesPerDay > 0 && (trades >= InpMaxTradesPerDay || trades + extra > InpMaxTradesPerDay))
+   {
+      reason = "Max trades per hari tercapai (" + IntegerToString(trades) + "/"
+             + IntegerToString(InpMaxTradesPerDay) + ", history hari ini)";
+      return true;
+   }
+
+   int openNow = CountOpenSimultaneous();
+   if(InpMaxOpenSimultaneous > 0 && (openNow >= InpMaxOpenSimultaneous || openNow + extra > InpMaxOpenSimultaneous))
+   {
+      reason = "Max open simultan tercapai (" + IntegerToString(openNow) + "/"
+             + IntegerToString(InpMaxOpenSimultaneous) + ")";
+      return true;
+   }
+   return false;
+}
+
+double GetEADailyPnL()
+{
+   datetime from = DayStartTime();
+   double pnl = 0.0;
+   if(HistorySelect(from, TimeCurrent()))
+   {
+      int total = HistoryDealsTotal();
+      for(int i = 0; i < total; i++)
+      {
+         ulong ticket = HistoryDealGetTicket(i);
+         if(ticket == 0) continue;
+         if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol) continue;
+         if((ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) != InpMagicNumber) continue;
+         long dtype = HistoryDealGetInteger(ticket, DEAL_TYPE);
+         if(dtype != DEAL_TYPE_BUY && dtype != DEAL_TYPE_SELL) continue;
+         pnl += HistoryDealGetDouble(ticket, DEAL_PROFIT);
+         pnl += HistoryDealGetDouble(ticket, DEAL_SWAP);
+         pnl += HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+      }
+   }
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong t = PositionGetTicket(i);
+      if(!PositionSelectByTicket(t)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+      pnl += PositionGetDouble(POSITION_PROFIT);
+      pnl += PositionGetDouble(POSITION_SWAP);
+   }
+   return pnl;
+}
+
+double GetAccountDailyPnL()
+{
+   datetime from = DayStartTime();
+   double pnl = 0.0;
+   if(HistorySelect(from, TimeCurrent()))
+   {
+      int total = HistoryDealsTotal();
+      for(int i = 0; i < total; i++)
+      {
+         ulong ticket = HistoryDealGetTicket(i);
+         if(ticket == 0) continue;
+         long dtype = HistoryDealGetInteger(ticket, DEAL_TYPE);
+         if(dtype != DEAL_TYPE_BUY && dtype != DEAL_TYPE_SELL) continue;
+         pnl += HistoryDealGetDouble(ticket, DEAL_PROFIT);
+         pnl += HistoryDealGetDouble(ticket, DEAL_SWAP);
+         pnl += HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+      }
+   }
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong t = PositionGetTicket(i);
+      if(!PositionSelectByTicket(t)) continue;
+      pnl += PositionGetDouble(POSITION_PROFIT);
+      pnl += PositionGetDouble(POSITION_SWAP);
+   }
+   return pnl;
+}
+
+double GetDailyPnLPercent()
+{
+   double pnl = GetAccountDailyPnL();
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double startEq = equity - pnl;
+   if(startEq <= 0.0)
+      startEq = GlobalVariableCheck(GVStartEqName()) ? GlobalVariableGet(GVStartEqName()) : equity;
+   if(startEq <= 0.0) return 0.0;
+   return pnl / startEq * 100.0;
+}
+
+bool IsHardStopActive()
+{
+   if(!InpHardDailyStop) return false;
+   EnsureDayState();
+   if(!GlobalVariableCheck(GVHaltName())) return false;
+   return ((int)GlobalVariableGet(GVHaltName()) == TodayKey());
+}
+
+void FlattenAccount()
+{
+   for(int pass = 0; pass < 3; pass++)
+   {
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+      {
+         ulong t = PositionGetTicket(i);
+         if(!PositionSelectByTicket(t)) continue;
+         if(!trade.PositionClose(t))
+            Print("Hard Daily Stop: gagal close posisi #", t, " ", trade.ResultRetcodeDescription());
+      }
+      for(int i = OrdersTotal() - 1; i >= 0; i--)
+      {
+         ulong t = OrderGetTicket(i);
+         if(!OrderSelect(t)) continue;
+         if(!trade.OrderDelete(t))
+            Print("Hard Daily Stop: gagal hapus order #", t, " ", trade.ResultRetcodeDescription());
+      }
+   }
+}
+
+void UpdateHardStopLabel()
+{
+   double pct = GetDailyPnLPercent();
+   string posTxt = "  |  trades " + IntegerToString(CountPositionsOpenedToday()) + "/"
+                 + IntegerToString(InpMaxTradesPerDay)
+                 + "  |  open " + IntegerToString(CountOpenSimultaneous()) + "/"
+                 + IntegerToString(InpMaxOpenSimultaneous);
+   string txt;
+   color clr;
+   if(IsHardStopActive())
+   {
+      txt = "HARD DAILY STOP " + DoubleToString(pct, 2) + "%  | OFF until 00:00 server" + posTxt;
+      clr = clrOrangeRed;
+   }
+   else
+   {
+      txt = "Daily PnL " + DoubleToString(pct, 2) + "%  (incl. floating)" + posTxt;
+      if((CountPositionsOpenedToday() >= InpMaxTradesPerDay && InpMaxTradesPerDay > 0) ||
+         (CountOpenSimultaneous() >= InpMaxOpenSimultaneous && InpMaxOpenSimultaneous > 0))
+         clr = clrOrangeRed;
+      else if(pct <= -InpMaxDailyLossPercent * 0.7) clr = clrOrange;
+      else if(pct < 0.0) clr = clrDarkOrange;
+      else clr = clrForestGreen;
+   }
+   DrawNativeLabel(PREF + "HardStop", txt, (PANEL_W + 20), 25, clr);
+}
+
+void TriggerHardDailyStop(const double pnlPct)
+{
+   bool firstTrigger = !IsHardStopActive();
+   GlobalVariableSet(GVHaltName(), (double)TodayKey());
+   FlattenAccount();
+   UpdateHardStopLabel();
+   if(firstTrigger)
+   {
+      string msg = "HARD DAILY STOP: Daily PnL (incl. floating) "
+                 + DoubleToString(pnlPct, 2) + "% <= -"
+                 + DoubleToString(InpMaxDailyLossPercent, 2)
+                 + "%. Semua posisi/order ditutup. Trading disable sampai 00:00 server.";
+      Print(msg);
+      Alert(msg);
+   }
+}
+
+void CheckHardDailyStop()
+{
+   EnsureDayState();
+   if(!InpHardDailyStop || InpMaxDailyLossPercent <= 0.0)
+   {
+      if(GlobalVariableCheck(GVHaltName()) && GlobalVariableGet(GVHaltName()) != 0.0)
+      {
+         GlobalVariableSet(GVHaltName(), 0.0);
+         Print("Hard Daily Stop OFF. Kunci harian dilepas, trading aktif lagi.");
+      }
+      UpdateHardStopLabel();
+      return;
+   }
+
+   if(IsHardStopActive())
+   {
+      if(PositionsTotal() > 0 || OrdersTotal() > 0)
+         FlattenAccount();
+      UpdateHardStopLabel();
+      return;
+   }
+
+   double pnlPct = GetDailyPnLPercent();
+   if(pnlPct <= -InpMaxDailyLossPercent)
+      TriggerHardDailyStop(pnlPct);
+   else
+      UpdateHardStopLabel();
+}
+
+bool IsTradingBlocked(string &reason, const int extraPositions = 0)
+{
+   EnsureDayState();
+   CheckHardDailyStop();
+
+   if(InpHardDailyStop && IsHardStopActive())
+   {
+      reason = "Hard Daily Stop aktif sampai 00:00 server";
+      return true;
+   }
+
+   if(WouldExceedDailyPositionLimit(extraPositions, reason))
+      return true;
+   return false;
 }
 
 void ApplyLotModeUI()
@@ -678,10 +1149,10 @@ void ApplyLotModeUI()
    {
       ObjectSetString(0, PREF+"BtnLotMode", OBJPROP_TEXT, "Risk %");
       ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_BGCOLOR, clrDarkGreen);
-      double riskVal = (g_lastRiskPct > 0.0) ? g_lastRiskPct : 1.0;
+      double riskVal = (g_lastRiskPct > 0.0) ? g_lastRiskPct : 0.12;
       ObjectSetString(0, PREF+"InpLot", OBJPROP_TEXT, DoubleToString(riskVal, 2));
       if(ObjectFind(0, PREF+"Line_Floor") < 0 && ObjectFind(0, PREF+"LblCalcLot") >= 0)
-         ObjectSetString(0, PREF+"LblCalcLot", OBJPROP_TEXT, "Lot/layer: (draw line)");
+         ObjectSetString(0, PREF+"LblCalcLot", OBJPROP_TEXT, "Lot setup: (draw line)");
    }
    else
    {
@@ -710,7 +1181,7 @@ void CreateCalcLotLabel()
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrOrange);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_ZORDER, 11);
-   ObjectSetString(0, name, OBJPROP_TEXT, IsAutoLot ? "Lot/layer: (draw line)" : "");
+   ObjectSetString(0, name, OBJPROP_TEXT, IsAutoLot ? "Lot setup: (draw line)" : "");
 }
 
 double CalcRiskUSD(ENUM_ORDER_TYPE orderType, double entry, double sl, double lot, int layers)
@@ -730,14 +1201,8 @@ double CalcRiskUSD(ENUM_ORDER_TYPE orderType, double entry, double sl, double lo
 
 void UpdateLotRiskDisplay(double bEntry, double bSL, double sEntry, double sSL)
 {
-   int layers = (int)GetInputValue("InpLayers");
-   if(layers < 1) layers = 1;
-
-   double buyLot  = GetResolvedLot(ORDER_TYPE_BUY, bEntry, bSL);
-   double sellLot = GetResolvedLot(ORDER_TYPE_SELL, sEntry, sSL);
-
-   double buyRiskUSD  = CalcRiskUSD(ORDER_TYPE_BUY, bEntry, bSL, buyLot, layers);
-   double sellRiskUSD = CalcRiskUSD(ORDER_TYPE_SELL, sEntry, sSL, sellLot, layers);
+   double buyRiskUSD  = CalcSetupRiskUSD(ORDER_TYPE_BUY, bEntry, bSL);
+   double sellRiskUSD = CalcSetupRiskUSD(ORDER_TYPE_SELL, sEntry, sSL);
 
    if(ObjectFind(0, PREF+"Buy_Risk") >= 0)
       ObjectSetString(0, PREF+"Buy_Risk", OBJPROP_TEXT, DoubleToString(buyRiskUSD, 2));
@@ -750,7 +1215,8 @@ void UpdateLotRiskDisplay(double bEntry, double bSL, double sEntry, double sSL)
 
    string calcText = "";
    if(IsAutoLot)
-      calcText = "Lot/layer: B " + DoubleToString(buyLot, 2) + " / S " + DoubleToString(sellLot, 2);
+      calcText = "Lot setup: B " + FormatLayerLots(ORDER_TYPE_BUY, bEntry, bSL)
+               + " / S " + FormatLayerLots(ORDER_TYPE_SELL, sEntry, sSL);
 
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_UPPER);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 10 + PANEL_W / 2);
@@ -775,15 +1241,21 @@ void PlaceBuyOrder() {
       Print("Buy Order: drawing line belum aktif. Klik Draw Line dulu.");
       return;
    }
+   string blockReason = "";
+   int layers = GetLayerCount();
+   if(IsTradingBlocked(blockReason, layers)) {
+      Print("Buy Order diblok: ", blockReason);
+      return;
+   }
    CalculateAndDrawAll();
 
-   int layers = (int)GetInputValue("InpLayers");
-   if(layers < 1) layers = 1;
    double proximal = GetInputValue("Buy_Entry");
    double sl = GetInputValue("Buy_Stoploss");
    double entry = NormalizeDouble(proximal + GetSpreadPrice() * 2.0, _Digits);
-   double lot = GetResolvedLot(ORDER_TYPE_BUY, entry, sl);
-   if(proximal == 0.0 || lot == 0.0) return;
+   if(proximal == 0.0) {
+      Print("Buy Order: Entry masih 0. Klik Draw Line / geser Floor-Ceiling dulu.");
+      return;
+   }
 
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    bool inArea = PriceInDrawArea(ask);
@@ -804,11 +1276,19 @@ void PlaceBuyOrder() {
 
    sl = NormalizeDouble(sl, _Digits);
    string kind = useStop ? "Stop" : "Limit";
-   Print("Buy ", kind, ": ", layers, " layer x ", DoubleToString(lot, 2), " lot",
-         IsAutoLot ? " (auto risk)" : " (manual)",
+   Print("Buy ", kind, " setup: ", layers, " order split ",
+         DoubleToString(InpSplitLot1, 0), "/", DoubleToString(InpSplitLot2, 0), "/", DoubleToString(InpSplitLot3, 0),
+         " lots ", FormatLayerLots(ORDER_TYPE_BUY, entry, sl),
+         IsAutoLot ? " (risk per setup)" : " (manual)",
          inArea ? " [in area]" : " [out area]");
 
+   int placed = 0;
    for(int i = 0; i < layers; i++) {
+      double lot = GetLayerLot(ORDER_TYPE_BUY, entry, sl, i);
+      if(lot <= 0.0) {
+         Print("Buy ", kind, " layer ", i + 1, " lot 0, dilewati.");
+         continue;
+      }
       double tp = NormalizeDouble(BuyTPByLayer(i, entry, sl), _Digits);
       string cmt = "Buy " + kind + " L" + IntegerToString(i + 1);
       bool ok = useStop
@@ -816,7 +1296,12 @@ void PlaceBuyOrder() {
          : trade.BuyLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, cmt);
       if(!ok)
          Print("Buy ", kind, " layer ", i + 1, " gagal. Error: ", GetLastError());
+      else
+         placed++;
    }
+   if(placed > 0)
+      Print("Buy ", kind, " terpasang: ", placed, " order. Posisi dibuka hari ini: ",
+            CountPositionsOpenedToday(), "/", InpMaxTradesPerDay);
 }
 
 void PlaceSellOrder() {
@@ -824,15 +1309,21 @@ void PlaceSellOrder() {
       Print("Sell Order: drawing line belum aktif. Klik Draw Line dulu.");
       return;
    }
+   string blockReason = "";
+   int layers = GetLayerCount();
+   if(IsTradingBlocked(blockReason, layers)) {
+      Print("Sell Order diblok: ", blockReason);
+      return;
+   }
    CalculateAndDrawAll();
 
-   int layers = (int)GetInputValue("InpLayers");
-   if(layers < 1) layers = 1;
    double proximal = GetInputValue("Sell_Entry");
    double sl = GetInputValue("Sell_Stoploss");
    double entry = NormalizeDouble(proximal - GetSpreadPrice() * 2.0, _Digits);
-   double lot = GetResolvedLot(ORDER_TYPE_SELL, entry, sl);
-   if(proximal == 0.0 || lot == 0.0) return;
+   if(proximal == 0.0) {
+      Print("Sell Order: Entry masih 0. Klik Draw Line / geser Floor-Ceiling dulu.");
+      return;
+   }
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    bool inArea = PriceInDrawArea(bid);
@@ -853,11 +1344,19 @@ void PlaceSellOrder() {
 
    sl = NormalizeDouble(sl, _Digits);
    string kind = useStop ? "Stop" : "Limit";
-   Print("Sell ", kind, ": ", layers, " layer x ", DoubleToString(lot, 2), " lot",
-         IsAutoLot ? " (auto risk)" : " (manual)",
+   Print("Sell ", kind, " setup: ", layers, " order split ",
+         DoubleToString(InpSplitLot1, 0), "/", DoubleToString(InpSplitLot2, 0), "/", DoubleToString(InpSplitLot3, 0),
+         " lots ", FormatLayerLots(ORDER_TYPE_SELL, entry, sl),
+         IsAutoLot ? " (risk per setup)" : " (manual)",
          inArea ? " [in area]" : " [out area]");
 
+   int placed = 0;
    for(int i = 0; i < layers; i++) {
+      double lot = GetLayerLot(ORDER_TYPE_SELL, entry, sl, i);
+      if(lot <= 0.0) {
+         Print("Sell ", kind, " layer ", i + 1, " lot 0, dilewati.");
+         continue;
+      }
       double tp = NormalizeDouble(SellTPByLayer(i, entry, sl), _Digits);
       string cmt = "Sell " + kind + " L" + IntegerToString(i + 1);
       bool ok = useStop
@@ -865,7 +1364,12 @@ void PlaceSellOrder() {
          : trade.SellLimit(lot, entry, _Symbol, sl, tp, ORDER_TIME_GTC, 0, cmt);
       if(!ok)
          Print("Sell ", kind, " layer ", i + 1, " gagal. Error: ", GetLastError());
+      else
+         placed++;
    }
+   if(placed > 0)
+      Print("Sell ", kind, " terpasang: ", placed, " order. Posisi dibuka hari ini: ",
+            CountPositionsOpenedToday(), "/", InpMaxTradesPerDay);
 }
 
 bool DrawingLinesActive()
@@ -882,6 +1386,11 @@ double GetDrawnLinePrice(string name)
 void PlaceBuyNow() {
    if(!DrawingLinesActive()) {
       Print("Buy Now: drawing line belum aktif. Klik Draw Line dulu.");
+      return;
+   }
+   string blockReason = "";
+   if(IsTradingBlocked(blockReason, 1)) {
+      Print("Buy Now diblok: ", blockReason);
       return;
    }
 
@@ -905,7 +1414,8 @@ void PlaceBuyNow() {
    sl = NormalizeDouble(sl, _Digits);
    tp = NormalizeDouble(tp, _Digits);
    if(trade.Buy(lot, _Symbol, 0, sl, tp, "BuyNow"))
-      Print("Buy Now: Lot=", lot, ", SL=", sl, ", TP5=", tp);
+      Print("Buy Now: Lot=", lot, ", SL=", sl, ", TP5=", tp,
+            " | posisi hari ini ", CountPositionsOpenedToday(), "/", InpMaxTradesPerDay);
    else
       Print("Failed to execute Buy order. Error: ", GetLastError());
 }
@@ -913,6 +1423,11 @@ void PlaceBuyNow() {
 void PlaceSellNow() {
    if(!DrawingLinesActive()) {
       Print("Sell Now: drawing line belum aktif. Klik Draw Line dulu.");
+      return;
+   }
+   string blockReason = "";
+   if(IsTradingBlocked(blockReason, 1)) {
+      Print("Sell Now diblok: ", blockReason);
       return;
    }
 
@@ -936,7 +1451,8 @@ void PlaceSellNow() {
    sl = NormalizeDouble(sl, _Digits);
    tp = NormalizeDouble(tp, _Digits);
    if(trade.Sell(lot, _Symbol, 0, sl, tp, "SellNow"))
-      Print("Sell Now: Lot=", lot, ", SL=", sl, ", TP5=", tp);
+      Print("Sell Now: Lot=", lot, ", SL=", sl, ", TP5=", tp,
+            " | posisi hari ini ", CountPositionsOpenedToday(), "/", InpMaxTradesPerDay);
    else
       Print("Failed to execute Sell order. Error: ", GetLastError());
 }
@@ -1007,14 +1523,14 @@ void CreateDashboard() {
    CreateLabel("Title", (PANEL_W / 2) + 20, HEADER_Y + 2, "SND Quick Retest", clrWhite);
    CreateObject("Panel", OBJ_RECTANGLE_LABEL, 0, 10, UI_Y, PANEL_W, PANEL_H, clrDarkSlateGray);
    
-   CreateLabel("LblLayers", 20, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "1");
+   CreateLabel("LblLayers", 20, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "3");
    CreateButton("BtnLotMode", 260, UI_Y+12, 100, 25, "Lot", clrDarkSlateGray, clrOrange);
-   CreateEdit("InpLot", 370, UI_Y+18, 100, 25, "1.00");
+   CreateEdit("InpLot", 370, UI_Y+18, 100, 25, "0.12");
    CreateCalcLotLabel();
    ApplyLotModeUI();
    
-   CreateButton("BtnDraw", 20, UI_Y+80, 180, 30, "Draw Line", clrPurple, clrWhite);
-   CreateButton("BtnScanSD", 270, UI_Y+80, 180, 30, "Scan S&D", clrDarkGreen, clrWhite);
+   CreateButton("BtnDraw", 20, UI_Y+80, 180, 30, "Draw Line [D]", clrPurple, clrWhite);
+   CreateButton("BtnScanSD", 270, UI_Y+80, 180, 30, "Scan S&D [A]", clrDarkGreen, clrWhite);
    
    string bL[]={"Floor","Entry","Stoploss","TP1","TP2","TP3","Area","Risk"}; 
    string sL[]={"Ceiling","Entry","Stoploss","TP1","TP2","TP3","Area","Risk"};
@@ -1022,16 +1538,16 @@ void CreateDashboard() {
       CreateLabel("LB_"+bL[i], 20, UI_Y+130+(i*30), bL[i], clrOrange); CreateEdit("Buy_"+bL[i], 130, UI_Y+134+(i*30), 110, 25, "0.00");
       CreateLabel("LS_"+sL[i], 270, UI_Y+130+(i*30), sL[i], clrOrange); CreateEdit("Sell_"+sL[i], 370, UI_Y+134+(i*30), 110, 25, "0.00");
    }
-   CreateButton("BtnBuyL", 20, UI_Y + 400, 200, 30, "Buy Order", clrBlue, clrWhite);
-   CreateButton("BtnSellL", 270, UI_Y + 400, 200, 30, "Sell Order", clrOrange, clrWhite);
-   CreateButton("DelBuy", 20, UI_Y + 440, 200, 30, "Del Buy", clrBlue, clrWhite);
-   CreateButton("DelSell", 270, UI_Y + 440, 200, 30, "Del Sell", clrBrown, clrWhite);
-   CreateButton("ClosePos", 20, UI_Y + 480, PANEL_W-40, 30, "Close Positions", clrDarkRed, clrWhite);
-   CreateButton("CloseOrd", 20, UI_Y + 520, PANEL_W-40, 30, "Close All Orders", clrMaroon, clrWhite);
+   CreateButton("BtnBuyL", 20, UI_Y + 400, 200, 30, "Buy Order [B]", clrBlue, clrWhite);
+   CreateButton("BtnSellL", 270, UI_Y + 400, 200, 30, "Sell Order [S]", clrOrange, clrWhite);
+   CreateButton("DelBuy", 20, UI_Y + 440, 200, 30, "Del Buy [Q]", clrBlue, clrWhite);
+   CreateButton("DelSell", 270, UI_Y + 440, 200, 30, "Del Sell [W]", clrBrown, clrWhite);
+   CreateButton("ClosePos", 20, UI_Y + 480, PANEL_W-40, 30, "Close Positions [P]", clrDarkRed, clrWhite);
+   CreateButton("CloseOrd", 20, UI_Y + 520, PANEL_W-40, 30, "Close All Orders [O]", clrMaroon, clrWhite);
    CreateButton("BuyNow", 20, UI_Y + 560, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
    CreateButton("SellNow", 270, UI_Y + 560, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
-   CreateButton("GetNews", 20, UI_Y + 600, 200, 30, "Get News", clrGray, clrBlack);
-   CreateButton("Reset", 270, UI_Y + 600, 200, 30, "Reset", clrGray, clrBlack);
+   CreateButton("GetNews", 20, UI_Y + 600, 200, 30, "Get News [N]", clrGray, clrBlack);
+   CreateButton("Reset", 270, UI_Y + 600, 200, 30, "Reset [R]", clrGray, clrBlack);
    ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_ZORDER, 10);
 
    // Tambahkan ini di setiap fungsi pembuatan tombol/label dashboard Anda
@@ -1093,6 +1609,7 @@ int GetInitialY(string name) {
    if(name == PREF+"HideQuote") return HEADER_Y + 7;
    if(name == PREF+"Title") return HEADER_Y + 2;
    if(name == PREF+"Live_Clock") return 50;
+   if(name == PREF+"HardStop") return 25;
    if(name == PREF+"Skor1") return 75;
    if(name == PREF+"Skor2") return 100;
    if(name == PREF+"Quote1") return 125;
