@@ -52,7 +52,7 @@ enum ENUM_LOT_MODE
 
 input group "--- RISK & TRANSMISSION ---"
 input ENUM_LOT_MODE InpLotMode     = LOT_AUTO_RISK; // Mode lot
-input double        InpRiskPercent = 0.12;        // Risk % auto (default 1, max 1%)
+input double        InpRiskPercent = 0.1;        // Risk % auto (default 1, max 1%)
 input bool          InpHardDailyStop = true;     // Hard Daily Stop (close semua + disable)
 input double        InpMaxDailyLossPercent = 2.0; // Hard stop jika Daily PnL+floating <= -%
 input int           InpMaxTradesPerDay = 16;     // Max trades per hari (dari history)
@@ -195,6 +195,7 @@ bool HasFiboDeepPosition();
 bool IsFiboOnChart();
 void EnsureFiboScanned();
 void DeleteFiboPending(const bool isBuy);
+datetime ServerNow();
 int    TodayKey();
 string GVDayName();
 string GVStartEqName();
@@ -925,10 +926,18 @@ double GetRiskBaseAmount()
    return AccountInfoDouble(ACCOUNT_BALANCE);
 }
 
+datetime ServerNow()
+{
+   datetime t = TimeTradeServer();
+   if(t <= 0) t = TimeGMT();
+   if(t <= 0) t = TimeCurrent();
+   return t;
+}
+
 int TodayKey()
 {
    MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
+   TimeToStruct(ServerNow(), dt);
    return dt.year * 10000 + dt.mon * 100 + dt.day;
 }
 
@@ -939,7 +948,7 @@ string GVHaltName()    { return "SNDFC_HALT_" + IntegerToString(InpMagicNumber);
 datetime DayStartTime()
 {
    MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
+   TimeToStruct(ServerNow(), dt);
    dt.hour = 0;
    dt.min  = 0;
    dt.sec  = 0;
@@ -966,8 +975,9 @@ void EnsureDayState()
 int CountPositionsOpenedToday()
 {
    datetime from = DayStartTime();
+   datetime to   = ServerNow();
    int count = 0;
-   if(!HistorySelect(from, TimeCurrent()))
+   if(to < from || !HistorySelect(from, to))
       return 0;
 
    int total = HistoryDealsTotal();
@@ -975,6 +985,7 @@ int CountPositionsOpenedToday()
    {
       ulong ticket = HistoryDealGetTicket(i);
       if(ticket == 0) continue;
+      if((datetime)HistoryDealGetInteger(ticket, DEAL_TIME) < from) continue;
       if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol) continue;
       if((ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) != InpMagicNumber) continue;
 
@@ -1036,14 +1047,16 @@ bool WouldExceedDailyPositionLimit(const int extraPositions, string &reason)
 double GetAccountDailyPnL()
 {
    datetime from = DayStartTime();
+   datetime to   = ServerNow();
    double pnl = 0.0;
-   if(HistorySelect(from, TimeCurrent()))
+   if(to >= from && HistorySelect(from, to))
    {
       int total = HistoryDealsTotal();
       for(int i = 0; i < total; i++)
       {
          ulong ticket = HistoryDealGetTicket(i);
          if(ticket == 0) continue;
+         if((datetime)HistoryDealGetInteger(ticket, DEAL_TIME) < from) continue;
          long dtype = HistoryDealGetInteger(ticket, DEAL_TYPE);
          if(dtype != DEAL_TYPE_BUY && dtype != DEAL_TYPE_SELL) continue;
          pnl += HistoryDealGetDouble(ticket, DEAL_PROFIT);
@@ -1064,6 +1077,7 @@ double GetAccountDailyPnL()
 
 double GetDailyPnLPercent()
 {
+   EnsureDayState();
    double pnl = GetAccountDailyPnL();
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    double startEq = equity - pnl;

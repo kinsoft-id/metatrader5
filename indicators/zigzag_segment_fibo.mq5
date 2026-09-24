@@ -15,7 +15,7 @@ input bool  InpShowActive = true;         // Tampilkan segmen ekstrem aktif
 
 input group "Fibonacci"
 input color InpFiboColor = clrBlack;
-input int   InpFiboWidth = 1;
+input int   InpFiboWidth = 2;
 input bool  InpFiboShowLabels = false; // Show label level
 input bool  InpFibo236   = true;   // Show 23.6
 input bool  InpFibo382   = true;   // Show 38.2
@@ -24,14 +24,22 @@ input bool  InpFibo618   = true;   // Show 61.8
 input bool  InpFibo786   = true;   // Show 78.6
 input bool  InpFibo886   = true;   // Show 88.6
 
+enum ENUM_HL_TF
+{
+   HL_TF_H1 = 0, // H1
+   HL_TF_H4 = 1, // H4
+   HL_TF_D1 = 2  // Daily
+};
+
 enum ENUM_H1_LINE_END
 {
    H1_END_RAY_RIGHT = 0, // Sampai ke kanan
-   H1_END_H1_CLOSE  = 1  // Sampai close H1 (M1 terakhir)
+   H1_END_H1_CLOSE  = 1  // Sampai close TF
 };
 
-input group "H1 Previous High/Low"
-input bool             InpShowH1HL    = true;          // Tampilkan previous high/low H1
+input group "Previous High/Low"
+input bool             InpShowH1HL    = true;          // Tampilkan previous high/low
+input ENUM_HL_TF       InpHLTimeframe = HL_TF_D1;      // Timeframe
 input int              InpH1MaxShow   = 3;             // Max show
 input ENUM_H1_LINE_END InpH1LineEnd   = H1_END_H1_CLOSE; // Ujung garis
 input color            InpH1BullColor = clrForestGreen;
@@ -41,7 +49,25 @@ input ENUM_LINE_STYLE  InpH1LineStyle = STYLE_DASH;
 input int              InpH1FontSize  = 8;
 
 #define PREFIX "ZZSEG_"
-#define H1_TF  PERIOD_H1
+
+ENUM_TIMEFRAMES HLTimeframe()
+{
+   int v = (int)InpHLTimeframe;
+   if(v == 1 || v == (int)PERIOD_H4)
+      return PERIOD_H4;
+   if(v == 2 || v == (int)PERIOD_D1)
+      return PERIOD_D1;
+   return PERIOD_H1;
+}
+
+string HLTagFromTf(const ENUM_TIMEFRAMES tf)
+{
+   if(tf == PERIOD_H4)
+      return "H4";
+   if(tf == PERIOD_D1)
+      return "D1";
+   return "H1";
+}
 
 struct PivotPoint
 {
@@ -58,6 +84,41 @@ bool       g_hasActiveLine = false;
 datetime   g_lastBarTime = 0;
 datetime   g_lastH1BarTime = 0;
 int        g_h1Shown = 0;
+ENUM_TIMEFRAMES g_hlTf = PERIOD_D1;
+
+string HLObjName(const string kind, const int i)
+{
+   return PREFIX + "HL_" + HLTagFromTf(g_hlTf) + "_" + kind + "_" + IntegerToString(i);
+}
+
+void ClearLegacyHLObjects()
+{
+   for(int i = 0; i < 64; i++)
+   {
+      string idx = IntegerToString(i);
+      ObjectDelete(0, PREFIX + "H1H_" + idx);
+      ObjectDelete(0, PREFIX + "H1L_" + idx);
+      ObjectDelete(0, PREFIX + "H1HT_" + idx);
+      ObjectDelete(0, PREFIX + "H1LT_" + idx);
+   }
+}
+
+void ClearAllHLObjects()
+{
+   ObjectsDeleteAll(0, PREFIX + "HL_");
+   ClearLegacyHLObjects();
+   g_h1Shown = 0;
+}
+
+int OnInit()
+{
+   g_hlTf = HLTimeframe();
+   g_lastH1BarTime = 0;
+   g_h1Shown = 0;
+   ObjectsDeleteAll(0, PREFIX);
+   IndicatorSetString(INDICATOR_SHORTNAME, "ZigZag Segment Fibo (" + HLTagFromTf(g_hlTf) + ")");
+   return(INIT_SUCCEEDED);
+}
 
 void OnDeinit(const int reason)
 {
@@ -438,7 +499,7 @@ bool StateChanged(const PivotPoint &pivots[], const int count,
 
 void EnsureHRay(const string name, const datetime t, const double price, const color col)
 {
-   datetime t2 = t + PeriodSeconds(H1_TF);
+   datetime t2 = t + PeriodSeconds(g_hlTf);
    bool rayRight = (InpH1LineEnd == H1_END_RAY_RIGHT);
    if(ObjectFind(0, name) < 0)
    {
@@ -483,11 +544,10 @@ void ClearH1Objects(const int keepCount)
    int lim = MathMax(g_h1Shown, keepCount);
    for(int i = keepCount; i < lim; i++)
    {
-      string idx = IntegerToString(i);
-      ObjectDelete(0, PREFIX + "H1H_" + idx);
-      ObjectDelete(0, PREFIX + "H1L_" + idx);
-      ObjectDelete(0, PREFIX + "H1HT_" + idx);
-      ObjectDelete(0, PREFIX + "H1LT_" + idx);
+      ObjectDelete(0, HLObjName("H", i));
+      ObjectDelete(0, HLObjName("L", i));
+      ObjectDelete(0, HLObjName("HT", i));
+      ObjectDelete(0, HLObjName("LT", i));
    }
    g_h1Shown = keepCount;
 }
@@ -496,38 +556,58 @@ bool UpdateH1Levels()
 {
    if(!InpShowH1HL)
    {
-      ClearH1Objects(0);
+      ClearAllHLObjects();
       return true;
    }
 
    int maxShow = MathMax(0, InpH1MaxShow);
    if(maxShow <= 0)
    {
-      ClearH1Objects(0);
+      ClearAllHLObjects();
       return true;
    }
 
-   MqlRates h1[];
-   ArraySetAsSeries(h1, true);
-   int copied = CopyRates(_Symbol, H1_TF, 1, maxShow, h1);
+   ENUM_TIMEFRAMES tf = g_hlTf;
+   if(!SeriesInfoInteger(_Symbol, tf, SERIES_SYNCHRONIZED))
+   {
+      datetime wait[];
+      CopyTime(_Symbol, tf, 0, 1, wait);
+      return false;
+   }
+
+   MqlRates htf[];
+   ArraySetAsSeries(htf, true);
+   int copied = CopyRates(_Symbol, tf, 1, maxShow, htf);
    if(copied <= 0)
       return false;
+
+   datetime expect = iTime(_Symbol, tf, 1);
+   if(expect == 0 || htf[0].time != expect)
+      return false;
+
+   if(tf != PERIOD_H1)
+   {
+      datetime tH1 = iTime(_Symbol, PERIOD_H1, 1);
+      if(tH1 != 0 && htf[0].time == tH1)
+         return false;
+   }
+
+   ClearLegacyHLObjects();
 
    int shown = 0;
    for(int i = 0; i < copied; i++)
    {
-      bool isBull = (h1[i].close >= h1[i].open);
+      bool isBull = (htf[i].close >= htf[i].open);
       color col = isBull ? InpH1BullColor : InpH1BearColor;
-      string idx = IntegerToString(i);
-      datetime t = h1[i].time;
+      datetime t = htf[i].time;
 
       string highLabel = isBull ? "Bullish" : "Strong High";
       string lowLabel  = isBull ? "Strong Low" : "Bearish";
 
-      EnsureHRay(PREFIX + "H1H_" + idx, t, h1[i].high, col);
-      EnsureHRay(PREFIX + "H1L_" + idx, t, h1[i].low, col);
-      EnsureHText(PREFIX + "H1HT_" + idx, t, h1[i].high, highLabel, col, ANCHOR_LEFT_LOWER);
-      EnsureHText(PREFIX + "H1LT_" + idx, t, h1[i].low, lowLabel, col, ANCHOR_LEFT_UPPER);
+      EnsureHRay(HLObjName("H", i), t, htf[i].high, col);
+      EnsureHRay(HLObjName("L", i), t, htf[i].low, col);
+      EnsureHText(HLObjName("HT", i), t, htf[i].high, highLabel, col, ANCHOR_LEFT_LOWER);
+      EnsureHText(HLObjName("LT", i), t, htf[i].low, lowLabel, col, ANCHOR_LEFT_UPPER);
       shown++;
    }
 
@@ -550,17 +630,17 @@ int OnCalculate(const int rates_total,
       return 0;
 
    datetime curBar = time[rates_total - 1];
-   datetime h1Bar = iTime(_Symbol, H1_TF, 0);
+   datetime htfBar = iTime(_Symbol, g_hlTf, 0);
    bool needCalc = (prev_calculated == 0 || curBar != g_lastBarTime || rates_total != prev_calculated);
-   bool needH1 = (prev_calculated == 0 || h1Bar == 0 || h1Bar != g_lastH1BarTime);
+   bool needH1 = (prev_calculated == 0 || htfBar == 0 || htfBar != g_lastH1BarTime);
 
    if(!needCalc && !needH1)
       return rates_total;
 
    if(needH1)
    {
-      if(UpdateH1Levels() && h1Bar != 0)
-         g_lastH1BarTime = h1Bar;
+      if(UpdateH1Levels() && htfBar != 0)
+         g_lastH1BarTime = htfBar;
    }
 
    if(!needCalc)

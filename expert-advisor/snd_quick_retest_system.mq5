@@ -31,7 +31,7 @@ enum ENUM_LOT_MODE
 
 input group "--- RISK & TRANSMISSION ---"
 input ENUM_LOT_MODE InpLotMode     = LOT_AUTO_RISK; // Mode lot
-input double        InpRiskPerSetup = 0.12;      // Risk % per setup (bukan per trade)
+input double        InpRiskPerSetup = 0.1;      // Risk % per setup (bukan per trade)
 input double        InpSplitLot1    = 50.0;      // Split S&D order 1 %
 input double        InpSplitLot2    = 30.0;      // Split S&D order 2 %
 input double        InpSplitLot3    = 20.0;      // Split S&D order 3 %
@@ -102,6 +102,8 @@ double GetLayerLot(ENUM_ORDER_TYPE orderType, double entry, double sl, int layer
 string FormatLayerLots(ENUM_ORDER_TYPE orderType, double entry, double sl);
 double CalcSetupRiskUSD(ENUM_ORDER_TYPE orderType, double entry, double sl);
 int    TodayKey();
+datetime ServerNow();
+datetime DayStartTime();
 string GVDayName();
 string GVStartEqName();
 void   EnsureDayState();
@@ -842,26 +844,34 @@ double CalcSetupRiskUSD(ENUM_ORDER_TYPE orderType, double entry, double sl)
    return total;
 }
 
+datetime ServerNow()
+{
+   datetime t = TimeTradeServer();
+   if(t <= 0) t = TimeGMT();
+   if(t <= 0) t = TimeCurrent();
+   return t;
+}
+
 int TodayKey()
 {
    MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
+   TimeToStruct(ServerNow(), dt);
    return dt.year * 10000 + dt.mon * 100 + dt.day;
 }
-
-string GVDayName()     { return "SNDQR_DAY_" + IntegerToString(InpMagicNumber); }
-string GVStartEqName() { return "SNDQR_STARTEQ_" + IntegerToString(InpMagicNumber); }
-string GVHaltName()    { return "SNDQR_HALT_" + IntegerToString(InpMagicNumber); }
 
 datetime DayStartTime()
 {
    MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
+   TimeToStruct(ServerNow(), dt);
    dt.hour = 0;
    dt.min  = 0;
    dt.sec  = 0;
    return StructToTime(dt);
 }
+
+string GVDayName()     { return "SNDQR_DAY_" + IntegerToString(InpMagicNumber); }
+string GVStartEqName() { return "SNDQR_STARTEQ_" + IntegerToString(InpMagicNumber); }
+string GVHaltName()    { return "SNDQR_HALT_" + IntegerToString(InpMagicNumber); }
 
 void EnsureDayState()
 {
@@ -884,7 +894,7 @@ int CountPositionsOpenedToday()
 {
    datetime from = DayStartTime();
    int count = 0;
-   if(!HistorySelect(from, TimeCurrent()))
+   if(!HistorySelect(from, ServerNow()))
       return 0;
 
    int total = HistoryDealsTotal();
@@ -954,7 +964,7 @@ double GetEADailyPnL()
 {
    datetime from = DayStartTime();
    double pnl = 0.0;
-   if(HistorySelect(from, TimeCurrent()))
+   if(HistorySelect(from, ServerNow()))
    {
       int total = HistoryDealsTotal();
       for(int i = 0; i < total; i++)
@@ -987,7 +997,7 @@ double GetAccountDailyPnL()
 {
    datetime from = DayStartTime();
    double pnl = 0.0;
-   if(HistorySelect(from, TimeCurrent()))
+   if(HistorySelect(from, ServerNow()))
    {
       int total = HistoryDealsTotal();
       for(int i = 0; i < total; i++)
@@ -1014,13 +1024,12 @@ double GetAccountDailyPnL()
 
 double GetDailyPnLPercent()
 {
-   double pnl = GetAccountDailyPnL();
+   EnsureDayState();
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double startEq = equity - pnl;
-   if(startEq <= 0.0)
-      startEq = GlobalVariableCheck(GVStartEqName()) ? GlobalVariableGet(GVStartEqName()) : equity;
+   double startEq = GlobalVariableCheck(GVStartEqName()) ? GlobalVariableGet(GVStartEqName()) : 0.0;
+   if(startEq <= 0.0) startEq = equity;
    if(startEq <= 0.0) return 0.0;
-   return pnl / startEq * 100.0;
+   return (equity - startEq) / startEq * 100.0;
 }
 
 bool IsHardStopActive()
