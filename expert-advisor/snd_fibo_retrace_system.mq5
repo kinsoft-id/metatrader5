@@ -493,7 +493,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       }
       else if(sparam == PREF+"HideQuote") {
          IsQuoteVisible = !IsQuoteVisible;
-         ObjectSetString(0, PREF+"HideQuote", OBJPROP_TEXT, IsQuoteVisible ? "Hide Q" : "Show Q");
+         ObjectSetString(0, PREF+"HideQuote", OBJPROP_TEXT, IsQuoteVisible ? "HideQ" : "ShowQ");
          ApplyQuoteVisibility();
          ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_STATE, false);
          ChartRedraw();
@@ -1346,23 +1346,23 @@ void RefreshRiskDisplay()
 {
    if(g_fiboActive || IsFiboOnChart())
    {
-      double sl   = FiboChartPrice(InpFiboLevel6);
-      double e382 = FiboChartPrice(InpFiboLevel2);
+      double sl   = FiboChartPrice(100.0);
       double e50  = FiboChartPrice(InpFiboLevel3);
-      if(e382 > 0.0 && e50 > 0.0 && sl > 0.0 && MathAbs(e382 - sl) > 0.0)
+      double e618 = FiboChartPrice(InpFiboLevel4);
+      if(e50 > 0.0 && e618 > 0.0 && sl > 0.0 && MathAbs(e50 - sl) > 0.0)
       {
          int layers = (int)GetInputValue("InpLayers");
          if(layers < 1) layers = 1;
 
-         double buyLot1  = GetResolvedLot(ORDER_TYPE_BUY, e382, sl);
-         double buyLot2  = GetResolvedLot(ORDER_TYPE_BUY, e50, sl);
-         double sellLot1 = GetResolvedLot(ORDER_TYPE_SELL, e382, sl);
-         double sellLot2 = GetResolvedLot(ORDER_TYPE_SELL, e50, sl);
+         double buyLot1  = GetResolvedLot(ORDER_TYPE_BUY, e50, sl);
+         double buyLot2  = GetResolvedLot(ORDER_TYPE_BUY, e618, sl);
+         double sellLot1 = GetResolvedLot(ORDER_TYPE_SELL, e50, sl);
+         double sellLot2 = GetResolvedLot(ORDER_TYPE_SELL, e618, sl);
 
-         double buyRisk  = CalcRiskUSD(ORDER_TYPE_BUY, e382, sl, buyLot1, layers)
-                         + CalcRiskUSD(ORDER_TYPE_BUY, e50, sl, buyLot2, layers);
-         double sellRisk = CalcRiskUSD(ORDER_TYPE_SELL, e382, sl, sellLot1, layers)
-                         + CalcRiskUSD(ORDER_TYPE_SELL, e50, sl, sellLot2, layers);
+         double buyRisk  = CalcRiskUSD(ORDER_TYPE_BUY, e50, sl, buyLot1, layers)
+                         + CalcRiskUSD(ORDER_TYPE_BUY, e618, sl, buyLot2, layers);
+         double sellRisk = CalcRiskUSD(ORDER_TYPE_SELL, e50, sl, sellLot1, layers)
+                         + CalcRiskUSD(ORDER_TYPE_SELL, e618, sl, sellLot2, layers);
 
          if(ObjectFind(0, PREF+"Buy_Risk") >= 0)
             ObjectSetString(0, PREF+"Buy_Risk", OBJPROP_TEXT, DoubleToString(buyRisk, 2));
@@ -1396,8 +1396,9 @@ void PlaceRegimeOrders(const bool isBuy, const bool isVolatile)
    string side = isBuy ? "Buy L " : "Sell L ";
    int layers = (int)GetInputValue("InpLayers");
    if(layers < 1) layers = 1;
+   int extra = 2 * layers;
    string blockReason = "";
-   if(IsTradingBlocked(blockReason, 2 * layers))
+   if(IsTradingBlocked(blockReason, extra))
    {
       Print(side, mode, ": ", blockReason);
       return;
@@ -1413,23 +1414,30 @@ void PlaceRegimeOrders(const bool isBuy, const bool isVolatile)
    DeleteFiboPending(isBuy);
    ResetFiboCutProfit(true);
 
-   // Layer A: 50 → TP 0.  Volatile SL 78.6 (kejar RR), Choppy SL 88.6 (anti sweep).
-   // Layer B: 38.2 → TP -27.2, SL 88.6.
-   double eA  = FiboChartPrice(InpFiboLevel3);
-   double tpA = FiboChartPrice(0.0);
-   double slA = FiboChartPrice(isVolatile ? InpFiboLevel5 : InpFiboLevel6);
-   double eB  = FiboChartPrice(InpFiboLevel2);
-   double tpB = FiboChartPrice(InpFiboTarget);
-   double slB = FiboChartPrice(InpFiboLevel6);
    string tag = isBuy ? "FiboBuy " : "FiboSell ";
+   double lvA, slLvA, tpLvA, lvB, slLvB, tpLvB;
+   if(isVolatile)
+   {
+      // 50 SL 78.6 TP 0 + 38.2 SL 78.6 TP -27.2
+      lvA = InpFiboLevel3; slLvA = InpFiboLevel5; tpLvA = 0.0;
+      lvB = InpFiboLevel2; slLvB = InpFiboLevel5; tpLvB = InpFiboTarget;
+   }
+   else
+   {
+      // 50 SL 100 TP -27.2 + 61.8 SL 100 TP 0
+      lvA = InpFiboLevel3; slLvA = 100.0; tpLvA = InpFiboTarget;
+      lvB = InpFiboLevel4; slLvB = 100.0; tpLvB = 0.0;
+   }
 
    Print(side, mode,
-         ": A ", DoubleToString(InpFiboLevel3, 1), " SL ",
-         DoubleToString(isVolatile ? InpFiboLevel5 : InpFiboLevel6, 1), " TP 0.0 + B ",
-         DoubleToString(InpFiboLevel2, 1), " SL ", DoubleToString(InpFiboLevel6, 1),
-         " TP ", DoubleToString(InpFiboTarget, 1));
-   PlaceLimitOrder(isBuy, eA, slA, tpA, tag + DoubleToString(InpFiboLevel3, 1));
-   PlaceLimitOrder(isBuy, eB, slB, tpB, tag + DoubleToString(InpFiboLevel2, 1));
+         ": A ", DoubleToString(lvA, 1), " SL ", DoubleToString(slLvA, 1),
+         " TP ", DoubleToString(tpLvA, 1), " + B ",
+         DoubleToString(lvB, 1), " SL ", DoubleToString(slLvB, 1),
+         " TP ", DoubleToString(tpLvB, 1));
+   PlaceLimitOrder(isBuy, FiboChartPrice(lvA), FiboChartPrice(slLvA),
+                   FiboChartPrice(tpLvA), tag + DoubleToString(lvA, 1));
+   PlaceLimitOrder(isBuy, FiboChartPrice(lvB), FiboChartPrice(slLvB),
+                   FiboChartPrice(tpLvB), tag + DoubleToString(lvB, 1));
 }
 
 void PlaceBuyNow() {
@@ -2605,8 +2613,8 @@ void PlaceFiboDirLimit(const int kind)
    if(kind == 1)
    {
       entryLv = InpFiboLevel1;
-      slLv    = InpFiboLevel4;
-      tpLv    = InpFiboTarget;
+      slLv    = InpFiboLevel2;
+      tpLv    = 0.0;
    }
    else
    {
