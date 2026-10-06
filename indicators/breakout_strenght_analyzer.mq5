@@ -28,6 +28,7 @@ input double InpWickMaxRatio   = 1.5;  // Max Upper Wick / Body Ratio
 input double InpAtrExpPct      = 5.0;  // ATR Expansion % vs Previous
 input int    InpConsecRequired = 2;    // Consecutive Strong Candles Required
 input bool   InpShowScore       = true; // Show Score on Candles
+input bool   InpAlertScore      = true; // Alert when Score is 2 or 3
 
 double openBuf[];
 double highBuf[];
@@ -38,7 +39,8 @@ double bullBuf[];
 double bearBuf[];
 double atrBuf[];
 
-int atrHandle = INVALID_HANDLE;
+int      atrHandle = INVALID_HANDLE;
+datetime g_lastAlertBar = 0;
 
 //+------------------------------------------------------------------+
 string Prefix()
@@ -78,10 +80,10 @@ int ColWidth(const int col)
 }
 
 //+------------------------------------------------------------------+
-// Jarak tepi kanan panel dari tepi kanan chart, supaya tidak menempel ke skala harga.
-int PanelRight()
+// Jarak tepi kiri panel dari tepi kiri chart.
+int PanelLeft()
 {
-   return 100;
+   return 16;
 }
 
 //+------------------------------------------------------------------+
@@ -97,10 +99,10 @@ int RowHeight()
 }
 
 //+------------------------------------------------------------------+
-int ColRightEdge(const int col)
+int ColLeftEdge(const int col)
 {
-   int x = PanelRight();
-   for(int c = 2; c > col; c--)
+   int x = PanelLeft();
+   for(int c = 0; c < col; c++)
       x += ColWidth(c) + 4;
    return x;
 }
@@ -112,12 +114,12 @@ int RowTop(const int row)
 }
 
 //+------------------------------------------------------------------+
-void PlaceRect(const string name, const int leftFromRight, const int topFromBottom,
+void PlaceRect(const string name, const int leftFromLeft, const int topFromBottom,
                const int width, const int height)
 {
-   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_RIGHT_LOWER);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_LOWER);
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, leftFromRight);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, leftFromLeft);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, topFromBottom);
    ObjectSetInteger(0, name, OBJPROP_XSIZE, width);
    ObjectSetInteger(0, name, OBJPROP_YSIZE, height);
@@ -137,7 +139,7 @@ void LayoutPanel()
    const string frame = Prefix() + "P_FRAME";
 
    PlaceRect(frame,
-             PanelRight() + tableW + pad,
+             PanelLeft() - pad,
              PanelBottom() + tableH + pad,
              tableW + pad * 2,
              tableH + pad * 2);
@@ -148,13 +150,13 @@ void LayoutPanel()
       {
          string rect = Prefix() + "P_R" + IntegerToString(row) + "_" + IntegerToString(col);
          string text = Prefix() + "P_T" + IntegerToString(row) + "_" + IntegerToString(col);
-         int left = ColRightEdge(col) + ColWidth(col);
+         int left = ColLeftEdge(col);
          int top  = RowTop(row);
 
          PlaceRect(rect, left, top, ColWidth(col), RowHeight());
-         ObjectSetInteger(0, text, OBJPROP_CORNER, CORNER_RIGHT_LOWER);
+         ObjectSetInteger(0, text, OBJPROP_CORNER, CORNER_LEFT_LOWER);
          ObjectSetInteger(0, text, OBJPROP_ANCHOR, ANCHOR_LEFT);
-         ObjectSetInteger(0, text, OBJPROP_XDISTANCE, left - 8);
+         ObjectSetInteger(0, text, OBJPROP_XDISTANCE, left + 8);
          ObjectSetInteger(0, text, OBJPROP_YDISTANCE, top - RowHeight() / 2);
       }
    }
@@ -353,6 +355,7 @@ int OnInit()
 
    IndicatorSetString(INDICATOR_SHORTNAME, "Breakout Strength");
    IndicatorSetInteger(INDICATOR_DIGITS, _Digits);
+   g_lastAlertBar = 0;
    CreatePanel();
    return(INIT_SUCCEEDED);
 }
@@ -414,6 +417,9 @@ int OnCalculate(const int rates_total,
    bool   panelWickPass = false;
    bool   panelAtrPass  = false;
    bool   panelConsecPass = false;
+   int    closedScore = 0;
+   bool   closedBullish = false;
+   datetime closedTime = 0;
 
    for(int i = rates_total - 1; i >= 0; i--)
    {
@@ -486,6 +492,31 @@ int OnCalculate(const int rates_total,
          panelWickPass = ruleWick;
          panelAtrPass = ruleAtr;
          panelConsecPass = ruleConsec;
+      }
+
+      if(i == 1)
+      {
+         closedScore = score;
+         closedBullish = bullish;
+         closedTime = time[i];
+      }
+   }
+
+   if(prev_calculated == 0)
+   {
+      if(closedTime > 0)
+         g_lastAlertBar = closedTime;
+   }
+   else if(InpAlertScore && closedTime > 0 && closedTime != g_lastAlertBar)
+   {
+      g_lastAlertBar = closedTime;
+      if(closedScore == 2 || closedScore == 3)
+      {
+         string tf = EnumToString((ENUM_TIMEFRAMES)_Period);
+         StringReplace(tf, "PERIOD_", "");
+         Alert(StringFormat("Breakout Strength %s %s score %d %s",
+                            _Symbol, tf, closedScore,
+                            closedBullish ? "Bullish" : "Bearish"));
       }
    }
 
