@@ -28,7 +28,7 @@ input double InpWickMaxRatio   = 1.5;  // Max Upper Wick / Body Ratio
 input double InpAtrExpPct      = 5.0;  // ATR Expansion % vs Previous
 input int    InpConsecRequired = 2;    // Consecutive Strong Candles Required
 input bool   InpShowScore       = true; // Show Score on Candles
-input bool   InpAlertScore      = true; // Alert when Score is 2 or 3
+input bool   InpAlertScore      = true; // Alert when visible Score is 2 or 3
 
 double openBuf[];
 double highBuf[];
@@ -419,6 +419,7 @@ int OnCalculate(const int rates_total,
    bool   panelConsecPass = false;
    int    closedScore = 0;
    bool   closedBullish = false;
+   bool   closedVisible = false;
    datetime closedTime = 0;
 
    for(int i = rates_total - 1; i >= 0; i--)
@@ -498,6 +499,7 @@ int OnCalculate(const int rates_total,
       {
          closedScore = score;
          closedBullish = bullish;
+         closedVisible = ruleBody;
          closedTime = time[i];
       }
    }
@@ -510,7 +512,7 @@ int OnCalculate(const int rates_total,
    else if(InpAlertScore && closedTime > 0 && closedTime != g_lastAlertBar)
    {
       g_lastAlertBar = closedTime;
-      if(closedScore == 2 || closedScore == 3)
+      if(closedVisible && (closedScore == 2 || closedScore == 3))
       {
          string tf = EnumToString((ENUM_TIMEFRAMES)_Period);
          StringReplace(tf, "PERIOD_", "");
