@@ -139,10 +139,6 @@ void PickFiboAtChart(const int x, const int y);
 void PickZzSegAtChart(const int x, const int y);
 bool FindZzSegmentAtClick(const int x, const int y, string &outSegName);
 void ClearFiboCandle();
-void PlaceFiboBuyLimit(const int levelIdx);
-void PlaceFiboSellLimit(const int levelIdx);
-void PlaceFiboBuyAll();
-void PlaceFiboSellAll();
 void PlaceFiboDirLimit(const int kind);
 void CreateFiboLevelToggles();
 void ApplyFiboLevelToggleStyle(const int lv);
@@ -155,7 +151,6 @@ double FiboLevelPos1618();
 double FiboPriceFromLow(const double levelInput);
 double FiboChartPrice(const double levelInput);
 double GetFiboLevelInput(const int levelIdx);
-void CreateFiboTradeButton(const string name, const datetime t, const double price, const string text, const color clr);
 void SyncFiboFromObject();
 void ActionScanSD();
 void ActionScanFibo();
@@ -175,7 +170,6 @@ void ActionGetNews();
 void ActionReset();
 bool HotkeyModifiersFree();
 void HandleHotkey(const long key);
-void UpdateFiboTradeButtons();
 void ApplyFiboObjectStyle(const string fiboName);
 void OnFiboObjectMoved(const string fiboName);
 void CreateFiboAnchorLines();
@@ -247,7 +241,6 @@ int OnInit()
    {
       SyncFiboFromObject();
       CreateFiboAnchorLines();
-      UpdateFiboTradeButtons();
       RefreshRiskDisplay();
    }
 
@@ -422,7 +415,7 @@ void HandleHotkey(const long key)
    else if(key == 81) ActionDelBuy();        // Q
    else if(key == 87) ActionDelSell();       // W
    else if(key == 50) ActionLim236();        // 2
-   else if(key == 54) ActionLim618();        // 6
+   else if(key == 55) ActionLim618();        // 7
    else if(key == 80) ActionClosePositions(); // P
    else if(key == 79) ActionCloseOrders();   // O
    else if(key == 78) ActionGetNews();       // N
@@ -546,22 +539,6 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       else if(sparam == PREF+"Reset") {
          ActionReset();
          ObjectSetInteger(0, PREF+"Reset", OBJPROP_STATE, false);
-      }
-      else if(StringFind(sparam, FIBO_PREF + "BUY_") == 0) {
-         int lvl = (int)StringToInteger(StringSubstr(sparam, StringLen(FIBO_PREF + "BUY_")));
-         PlaceFiboBuyLimit(lvl);
-         ObjectSetInteger(0, sparam, OBJPROP_SELECTED, false);
-         ObjectSetInteger(0, sparam, OBJPROP_SELECTABLE, false);
-         ChartRedraw();
-         ObjectSetInteger(0, sparam, OBJPROP_SELECTABLE, true);
-      }
-      else if(StringFind(sparam, FIBO_PREF + "SELL_") == 0) {
-         int lvl = (int)StringToInteger(StringSubstr(sparam, StringLen(FIBO_PREF + "SELL_")));
-         PlaceFiboSellLimit(lvl);
-         ObjectSetInteger(0, sparam, OBJPROP_SELECTED, false);
-         ObjectSetInteger(0, sparam, OBJPROP_SELECTABLE, false);
-         ChartRedraw();
-         ObjectSetInteger(0, sparam, OBJPROP_SELECTABLE, true);
       }
       // --- DETEKSI KLIK TOMBOL BULAT S&D ---
       else if(StringFind(sparam, ZONE_PREF + "BTN_") == 0) {
@@ -1623,7 +1600,7 @@ void CreateDashboard() {
    CreateButton("DelBuy", 20, UI_Y + 284, 250, 30, "Del Buy [Q]", clrBlue, clrWhite);
    CreateButton("DelSell", 290, UI_Y + 284, 250, 30, "Del Sell [W]", clrBrown, clrWhite);
    CreateButton("BtnLim236", 20, UI_Y + 324, 250, 30, "Limit 23.6 [2]", clrDodgerBlue, clrWhite);
-   CreateButton("BtnLim618", 290, UI_Y + 324, 250, 30, "Limit 61.8 [6]", clrOrangeRed, clrWhite);
+   CreateButton("BtnLim618", 290, UI_Y + 324, 250, 30, "Limit 78.6 [7]", clrOrangeRed, clrWhite);
    CreateButton("ClosePos", 20, UI_Y + 364, 250, 30, "Close Positions [P]", clrDarkRed, clrWhite);
    CreateButton("CloseOrd", 290, UI_Y + 364, 250, 30, "Close Orders [O]", clrMaroon, clrWhite);
    CreateButton("BuyNow", 20, UI_Y + 404, 250, 30, "Buy Now", clrDodgerBlue, clrWhite);
@@ -1719,24 +1696,6 @@ double GetFiboLevelInput(const int levelIdx)
    return 0.0;
 }
 
-void CreateFiboTradeButton(const string name, const datetime t, const double price, const string text, const color clr)
-{
-   if(ObjectFind(0, name) >= 0)
-      ObjectDelete(0, name);
-
-   ObjectCreate(0, name, OBJ_ARROW, 0, t, price);
-   ObjectSetInteger(0, name, OBJPROP_ARROWCODE, 108);
-   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
-   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, true);
-   ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
-   ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
-   ObjectSetInteger(0, name, OBJPROP_BACK, false);
-   ObjectSetInteger(0, name, OBJPROP_ZORDER, 25);
-   ObjectSetString(0, name, OBJPROP_TOOLTIP, text);
-}
-
 void ApplyFiboObjectStyle(const string fiboName)
 {
    ObjectSetInteger(0, fiboName, OBJPROP_SELECTABLE, false);
@@ -1751,7 +1710,6 @@ void OnFiboObjectMoved(const string fiboName)
    SyncFiboFromObject();
    SyncFiboAnchorLines();
    ResetFiboCutProfit(true);
-   UpdateFiboTradeButtons();
    RefreshRiskDisplay();
 }
 
@@ -1824,7 +1782,6 @@ void OnFiboAnchorDragged()
    g_fiboActive = true;
    ResetFiboCutProfit(true);
    UpdateFiboObjectFromGlobals();
-   UpdateFiboTradeButtons();
    RefreshRiskDisplay();
 }
 
@@ -1844,40 +1801,6 @@ void SyncFiboFromObject()
    g_fiboBullish = (p1 > p0);
    g_fiboTime = (datetime)ObjectGetInteger(0, fiboName, OBJPROP_TIME, 0);
    g_fiboActive = true;
-}
-
-void UpdateFiboTradeButtons()
-{
-   if(!g_fiboActive)
-      return;
-
-   datetime tBuy  = g_fiboTime - PeriodSeconds() * 2;
-   datetime tSell = g_fiboTime - PeriodSeconds();
-
-   for(int lv = 1; lv <= 5; lv++)
-   {
-      double price = FiboChartPrice(GetFiboLevelInput(lv));
-      string buyName  = FIBO_PREF + "BUY_"  + IntegerToString(lv);
-      string sellName = FIBO_PREF + "SELL_" + IntegerToString(lv);
-
-      if(ObjectFind(0, buyName) >= 0)
-      {
-         ObjectMove(0, buyName, 0, tBuy, price);
-         ObjectSetInteger(0, buyName, OBJPROP_COLOR, clrLime);
-         ObjectSetInteger(0, buyName, OBJPROP_WIDTH, 1);
-      }
-      else
-         CreateFiboTradeButton(buyName, tBuy, price, "Buy L", clrLime);
-
-      if(ObjectFind(0, sellName) >= 0)
-      {
-         ObjectMove(0, sellName, 0, tSell, price);
-         ObjectSetInteger(0, sellName, OBJPROP_COLOR, clrRed);
-         ObjectSetInteger(0, sellName, OBJPROP_WIDTH, 1);
-      }
-      else
-         CreateFiboTradeButton(sellName, tSell, price, "Sell L", clrRed);
-   }
 }
 
 void ClearFiboCandle()
@@ -1942,7 +1865,6 @@ void ScanFiboCandle(const int shiftParam)
 
    g_fiboActive = true;
    ResetFiboCutProfit(false);
-   UpdateFiboTradeButtons();
    CreateFiboAnchorLines();
    RefreshRiskDisplay();
 
@@ -2115,7 +2037,6 @@ void ScanFiboFromZzSegment(const string zzSegName)
 
    g_fiboActive = true;
    ResetFiboCutProfit(false);
-   UpdateFiboTradeButtons();
    CreateFiboAnchorLines();
    RefreshRiskDisplay();
 
@@ -2379,214 +2300,6 @@ void PlaceLimitOrder(const bool isBuy, const double entry, const double sl, cons
    }
 }
 
-void PlaceFiboBuyLimit(const int levelIdx)
-{
-   int layers = (int)GetInputValue("InpLayers");
-   if(layers < 1) layers = 1;
-   string blockReason = "";
-   if(IsTradingBlocked(blockReason, layers))
-   {
-      Print("FiboBuy: ", blockReason);
-      return;
-   }
-
-   if(!g_fiboActive)
-   {
-      Print("Klik Scan Fibo Candle dulu.");
-      return;
-   }
-
-   double levelInput = GetFiboLevelInput(levelIdx);
-   if(levelInput == 0.0) return;
-
-   double entry = FiboChartPrice(levelInput);
-   double sl    = FiboPriceFromLow(InpFiboTarget);
-   double tp    = 0.0;
-
-   if(g_fiboBullish)
-   {
-      // 0=High: 23.6 → -61.8 | 38.2 → 1.272 di atas | 50 → 0 | 61.8 & 78.6 → 23.6
-      if(levelIdx == 1)
-      {
-         tp = FiboChartPrice(FiboLevelNeg618());
-         if(tp <= entry)
-            tp = FiboPriceFromLow(FiboLevelPos1618());
-      }
-      else if(levelIdx == 2)
-         tp = FiboPriceFromLow(FiboOppTarget());
-      else if(levelIdx == 3)
-         tp = FiboChartPrice(0.0);
-      else
-         tp = FiboChartPrice(InpFiboLevel1);
-   }
-   else
-   {
-      // 0=Low: 23.6 → -61.8 | 38.2 → 1.272 | 50 → 100 (high) | 61.8 & 78.6 → 1.272
-      if(levelIdx == 1)
-      {
-         tp = FiboChartPrice(FiboLevelNeg618());
-         if(tp <= entry)
-            tp = FiboPriceFromLow(FiboLevelPos1618());
-      }
-      else if(levelIdx == 2)
-         tp = FiboChartPrice(FiboOppTarget());
-      else if(levelIdx == 3)
-         tp = FiboChartPrice(100.0);
-      else
-         tp = FiboPriceFromLow(FiboOppTarget());
-   }
-
-   PlaceLimitOrder(true, entry, sl, tp, "FiboBuy " + DoubleToString(levelInput, 1),
-                   (levelIdx == 4 || levelIdx == 5) ? 2.0 : 1.0);
-}
-
-void PlaceFiboSellLimit(const int levelIdx)
-{
-   int layers = (int)GetInputValue("InpLayers");
-   if(layers < 1) layers = 1;
-   string blockReason = "";
-   if(IsTradingBlocked(blockReason, layers))
-   {
-      Print("FiboSell: ", blockReason);
-      return;
-   }
-
-   if(!g_fiboActive)
-   {
-      Print("Klik Scan Fibo Candle dulu.");
-      return;
-   }
-
-   double levelInput = GetFiboLevelInput(levelIdx);
-   if(levelInput == 0.0) return;
-
-   double entry = FiboChartPrice(levelInput);
-   double sl    = FiboPriceFromLow(FiboOppTarget());
-   double tp    = 0.0;
-
-   if(g_fiboBullish)
-   {
-      // 0=High: 23.6 → -61.8 | 38.2 → 1.272 di bawah | 50 → 100 | 61.8 & 78.6 → 1.272
-      if(levelIdx == 1)
-      {
-         tp = FiboChartPrice(FiboLevelNeg618());
-         if(tp >= entry)
-            tp = FiboChartPrice(FiboLevelPos1618());
-      }
-      else if(levelIdx == 2)
-         tp = FiboChartPrice(FiboOppTarget());
-      else if(levelIdx == 3)
-         tp = FiboChartPrice(100.0);
-      else
-         tp = FiboChartPrice(FiboOppTarget());
-   }
-   else
-   {
-      // 0=Low: 23.6 → -61.8 | 38.2 → -27.2 | 50 → 0 | 61.8 & 78.6 → 23.6
-      if(levelIdx == 1)
-      {
-         tp = FiboChartPrice(FiboLevelNeg618());
-         if(tp >= entry)
-            tp = FiboChartPrice(FiboLevelPos1618());
-      }
-      else if(levelIdx == 2)
-         tp = FiboPriceFromLow(InpFiboTarget);
-      else if(levelIdx == 3)
-         tp = FiboChartPrice(0.0);
-      else
-         tp = FiboChartPrice(InpFiboLevel1);
-   }
-
-   PlaceLimitOrder(false, entry, sl, tp, "FiboSell " + DoubleToString(levelInput, 1),
-                   (levelIdx == 4 || levelIdx == 5) ? 2.0 : 1.0);
-}
-
-void PlaceFiboBuyAll()
-{
-   int layers = (int)GetInputValue("InpLayers");
-   if(layers < 1) layers = 1;
-   int selected = 0;
-   for(int lv = 1; lv <= 5; lv++)
-      if(IsFiboLevelSelected(lv)) selected++;
-
-   string blockReason = "";
-   if(IsTradingBlocked(blockReason, selected * layers))
-   {
-      Print("Buy L Fibo: ", blockReason);
-      return;
-   }
-
-   EnsureFiboScanned();
-   if(!g_fiboActive)
-   {
-      Print("Buy L Fibo: scan fibo gagal.");
-      return;
-   }
-
-   DeleteFiboPending(true);
-   DeleteFiboPending(false);
-   ResetFiboCutProfit(true);
-
-   int placed = 0;
-   string sel = "";
-   for(int lv = 1; lv <= 5; lv++)
-   {
-      if(!IsFiboLevelSelected(lv))
-         continue;
-      PlaceFiboBuyLimit(lv);
-      sel += (sel == "" ? "" : ", ") + DoubleToString(GetFiboLevelInput(lv), 1);
-      placed++;
-   }
-   if(placed == 0)
-      Print("Buy L Fibo: pilih minimal 1 level fibo di dashboard.");
-   else
-      Print("Buy L Fibo: order level ", sel,
-            " | posisi hari ini ", CountPositionsOpenedToday(), "/", InpMaxTradesPerDay);
-}
-
-void PlaceFiboSellAll()
-{
-   int layers = (int)GetInputValue("InpLayers");
-   if(layers < 1) layers = 1;
-   int selected = 0;
-   for(int lv = 1; lv <= 5; lv++)
-      if(IsFiboLevelSelected(lv)) selected++;
-
-   string blockReason = "";
-   if(IsTradingBlocked(blockReason, selected * layers))
-   {
-      Print("Sell L Fibo: ", blockReason);
-      return;
-   }
-
-   EnsureFiboScanned();
-   if(!g_fiboActive)
-   {
-      Print("Sell L Fibo: scan fibo gagal.");
-      return;
-   }
-
-   DeleteFiboPending(false);
-   DeleteFiboPending(true);
-   ResetFiboCutProfit(true);
-
-   int placed = 0;
-   string sel = "";
-   for(int lv = 1; lv <= 5; lv++)
-   {
-      if(!IsFiboLevelSelected(lv))
-         continue;
-      PlaceFiboSellLimit(lv);
-      sel += (sel == "" ? "" : ", ") + DoubleToString(GetFiboLevelInput(lv), 1);
-      placed++;
-   }
-   if(placed == 0)
-      Print("Sell L Fibo: pilih minimal 1 level fibo di dashboard.");
-   else
-      Print("Sell L Fibo: order level ", sel,
-            " | posisi hari ini ", CountPositionsOpenedToday(), "/", InpMaxTradesPerDay);
-}
-
 void PlaceFiboDirLimit(const int kind)
 {
    int layers = (int)GetInputValue("InpLayers");
@@ -2618,9 +2331,9 @@ void PlaceFiboDirLimit(const int kind)
    }
    else
    {
-      entryLv = InpFiboLevel4;
-      slLv    = InpFiboLevel6;
-      tpLv    = InpFiboLevel1;
+      entryLv = InpFiboLevel5;
+      slLv    = 100.0;
+      tpLv    = InpFiboLevel2;
    }
 
    double entry = FiboChartPrice(entryLv);
