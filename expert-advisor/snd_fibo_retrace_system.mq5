@@ -260,9 +260,10 @@ void OnTimer()
    if(!quotesDrawn)
    {
       DrawNativeLabel(PREF + "Check1", "Cari Momentum ZigZag yang berhasil Break Structure", (PANEL_W + 20), 75, clrBlack);
-      DrawNativeLabel(PREF + "Check2", "Momentum ZigZag masih berlaku jika belum menyentuh fibo -61.8", (PANEL_W + 20), 100, clrBlack);
-      DrawNativeLabel(PREF + "Check3", "Jika sudah menyentuh garis fibo -61.8, maka pindahkan Momentum ZigZag ke yang terbaru", (PANEL_W + 20), 125, clrBlack);
-      DrawNativeLabel(PREF + "Quote", "Jam Trading: 08-16 WIB, 20-22 WIB", (PANEL_W + 20), 150, clrBlack);
+      DrawNativeLabel(PREF + "Check2", "Range break 0-23.6 limit masih di momemtum zigzag sebelumnya", (PANEL_W + 20), 100, clrBlack);
+      DrawNativeLabel(PREF + "Check3", "Jika sudah menyentuh garis fibo 23.6, maka pindahkan Momentum ZigZag ke yang terbaru", (PANEL_W + 20), 125, clrBlack);
+      DrawNativeLabel(PREF + "Check4", "Range break 23.6-38.2 limit 78.6, 38.2-50.0 Choppy, 50.0-78.6 Volatile", (PANEL_W + 20), 150, clrBlack);
+      
       quotesDrawn = true;
    }
    UpdateLiveClock();
