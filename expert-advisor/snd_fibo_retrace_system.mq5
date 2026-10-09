@@ -259,7 +259,7 @@ void OnTimer()
    static bool quotesDrawn = false;
    if(!quotesDrawn)
    {
-      DrawNativeLabel(PREF + "Check1", "Cari Momentum ZigZag yang berhasil Break Structure", (PANEL_W + 20), 75, clrBlack);
+      DrawNativeLabel(PREF + "Check1", "Break Structure, Utk Break Mayor = Hati2 False Break, entry Choppy dulu", (PANEL_W + 20), 75, clrBlack);
       DrawNativeLabel(PREF + "Check2", "Range break 0-23.6 limit masih di momemtum zigzag sebelumnya", (PANEL_W + 20), 100, clrBlack);
       DrawNativeLabel(PREF + "Check3", "Jika sudah menyentuh garis fibo 23.6, maka pindahkan Momentum ZigZag ke yang terbaru", (PANEL_W + 20), 125, clrBlack);
       DrawNativeLabel(PREF + "Check4", "Range break 23.6-38.2 limit 78.6, 38.2-50.0 Choppy, 50.0-78.6 Volatile", (PANEL_W + 20), 150, clrBlack);
@@ -442,7 +442,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
                name != PREF+"Check1" &&
                name != PREF+"Check2" &&
                name != PREF+"Check3" &&
-               name != PREF+"Quote" &&
+               name != PREF+"Check4" &&
                name != PREF+"HardStop") { 
                ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? GetInitialY(name) : UI_OFFSCREEN); 
             } 
@@ -641,7 +641,7 @@ void ApplyQuoteVisibility()
    if(ObjectFind(0, PREF + "Check1") >= 0) ObjectSetInteger(0, PREF + "Check1", OBJPROP_YDISTANCE, yCheck1);
    if(ObjectFind(0, PREF + "Check2") >= 0) ObjectSetInteger(0, PREF + "Check2", OBJPROP_YDISTANCE, yCheck2);
    if(ObjectFind(0, PREF + "Check3") >= 0) ObjectSetInteger(0, PREF + "Check3", OBJPROP_YDISTANCE, yCheck3);
-   if(ObjectFind(0, PREF + "Quote")  >= 0) ObjectSetInteger(0, PREF + "Quote",  OBJPROP_YDISTANCE, yQuote);
+   if(ObjectFind(0, PREF + "Check4")  >= 0) ObjectSetInteger(0, PREF + "Check4",  OBJPROP_YDISTANCE, yQuote);
 }
 
 // --- HELPER MAKER OBJEK DASHBOARD NATIVE (ANTI-TEKS KEPOTONG) ---
@@ -2330,7 +2330,7 @@ int GetInitialY(string name) {
    if(name == PREF+"Check1") return 75;
    if(name == PREF+"Check2") return 100;
    if(name == PREF+"Check3") return 125;
-   if(name == PREF+"Quote") return 150;
+   if(name == PREF+"Check4") return 150;
    if(name == PREF+"Panel") return UI_Y;
    if(name == PREF+"LblLayers") return UI_Y + 26;
    if(name == PREF+"InpLayers" || name == PREF+"BtnLotMode" || name == PREF+"InpLot") return UI_Y + 14;
