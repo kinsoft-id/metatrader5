@@ -263,6 +263,7 @@ void OnTimer()
       DrawNativeLabel(PREF + "Check2", "Range break 0-23.6 limit masih di momemtum zigzag sebelumnya", (PANEL_W + 20), 100, clrBlack);
       DrawNativeLabel(PREF + "Check3", "Jika sudah menyentuh garis fibo 23.6, maka pindahkan Momentum ZigZag ke yang terbaru", (PANEL_W + 20), 125, clrBlack);
       DrawNativeLabel(PREF + "Check4", "Range break 23.6-38.2 limit 78.6, 38.2-50.0 Choppy, 50.0-78.6 Volatile", (PANEL_W + 20), 150, clrBlack);
+      DrawNativeLabel(PREF + "Check5", "Setelah break, Cek retrace sebelumnya ada di level berapa, kemungkinan retracement akan terjadi di level tersebut", (PANEL_W + 20), 175, clrBlack);
       
       quotesDrawn = true;
    }
@@ -443,6 +444,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
                name != PREF+"Check2" &&
                name != PREF+"Check3" &&
                name != PREF+"Check4" &&
+               name != PREF+"Check5" &&
                name != PREF+"HardStop") { 
                ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? GetInitialY(name) : UI_OFFSCREEN); 
             } 
@@ -642,6 +644,7 @@ void ApplyQuoteVisibility()
    if(ObjectFind(0, PREF + "Check2") >= 0) ObjectSetInteger(0, PREF + "Check2", OBJPROP_YDISTANCE, yCheck2);
    if(ObjectFind(0, PREF + "Check3") >= 0) ObjectSetInteger(0, PREF + "Check3", OBJPROP_YDISTANCE, yCheck3);
    if(ObjectFind(0, PREF + "Check4")  >= 0) ObjectSetInteger(0, PREF + "Check4",  OBJPROP_YDISTANCE, yQuote);
+   if(ObjectFind(0, PREF + "Check5")  >= 0) ObjectSetInteger(0, PREF + "Check5",  OBJPROP_YDISTANCE, yQuote);
 }
 
 // --- HELPER MAKER OBJEK DASHBOARD NATIVE (ANTI-TEKS KEPOTONG) ---
@@ -2158,7 +2161,7 @@ void PlaceFiboDirLimit(const int kind)
    int layers = (int)GetInputValue("InpLayers");
    if(layers < 1) layers = 1;
    string blockReason = "";
-   if(IsTradingBlocked(blockReason, layers))
+   if(IsTradingBlocked(blockReason, 2 * layers))
    {
       Print("Limit Fibo: ", blockReason);
       return;
@@ -2171,32 +2174,36 @@ void PlaceFiboDirLimit(const int kind)
       return;
    }
 
-   double entryLv = 0.0;
-   double slLv    = 0.0;
-   double tpLv    = 0.0;
+   double lvA, slLvA, tpLvA, lvB, slLvB, tpLvB;
    if(kind == 1)
    {
-      entryLv = InpFiboLevel1;
-      slLv    = InpFiboLevel2;
-      tpLv    = 0.0;
+      // 23.6 SL 50 TP -27.2 + 38.2 SL 50 TP 0
+      lvA = InpFiboLevel1; slLvA = InpFiboLevel3; tpLvA = InpFiboTarget;
+      lvB = InpFiboLevel2; slLvB = InpFiboLevel3; tpLvB = 0.0;
    }
    else
    {
-      entryLv = InpFiboLevel5;
-      slLv    = 100.0;
-      tpLv    = InpFiboLevel2;
+      // 61.8 SL 100 TP 0 + 78.6 SL 100 TP 38.2
+      lvA = InpFiboLevel4; slLvA = 100.0; tpLvA = 0.0;
+      lvB = InpFiboLevel5; slLvB = 100.0; tpLvB = InpFiboLevel2;
    }
 
-   double entry = FiboChartPrice(entryLv);
-   double sl    = FiboChartPrice(slLv);
-   double tp    = FiboChartPrice(tpLv);
-   bool isBuy   = g_fiboBullish;
-   string tag   = isBuy ? "FiboBuy " : "FiboSell ";
+   bool isBuy = g_fiboBullish;
+   string tag = isBuy ? "FiboBuy " : "FiboSell ";
+   DeleteFiboPending(isBuy);
 
-   Print("Limit ", DoubleToString(entryLv, 1),
+   Print("Limit ",
+         kind == 1 ? "23.6" : "78.6",
          isBuy ? " BUY" : " SELL",
-         " (arah fibo ", (g_fiboBullish ? "bullish" : "bearish"), ")");
-   PlaceLimitOrder(isBuy, entry, sl, tp, tag + DoubleToString(entryLv, 1));
+         " (arah fibo ", (g_fiboBullish ? "bullish" : "bearish"), ")",
+         ": A ", DoubleToString(lvA, 1), " SL ", DoubleToString(slLvA, 1),
+         " TP ", DoubleToString(tpLvA, 1), " + B ",
+         DoubleToString(lvB, 1), " SL ", DoubleToString(slLvB, 1),
+         " TP ", DoubleToString(tpLvB, 1));
+   PlaceLimitOrder(isBuy, FiboChartPrice(lvA), FiboChartPrice(slLvA),
+                   FiboChartPrice(tpLvA), tag + DoubleToString(lvA, 1));
+   PlaceLimitOrder(isBuy, FiboChartPrice(lvB), FiboChartPrice(slLvB),
+                   FiboChartPrice(tpLvB), tag + DoubleToString(lvB, 1));
 }
 
 bool IsFiboOnChart()
@@ -2331,6 +2338,7 @@ int GetInitialY(string name) {
    if(name == PREF+"Check2") return 100;
    if(name == PREF+"Check3") return 125;
    if(name == PREF+"Check4") return 150;
+   if(name == PREF+"Check5") return 175;
    if(name == PREF+"Panel") return UI_Y;
    if(name == PREF+"LblLayers") return UI_Y + 26;
    if(name == PREF+"InpLayers" || name == PREF+"BtnLotMode" || name == PREF+"InpLot") return UI_Y + 14;
