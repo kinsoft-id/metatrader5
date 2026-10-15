@@ -1406,10 +1406,10 @@ void PlaceBuyNow() {
 
    double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double sl = GetInputValue("Buy_Stoploss");
-   double tp = GetDrawnLinePrice(PREF+"Calc_B_TP5");
+   double tp = GetDrawnLinePrice(PREF+"Calc_B_TP2");
 
    if(sl <= 0.0 || sl >= entry || tp <= entry) {
-      Print("Buy Now: butuh SL < Entry < TP5. SL=", sl, " Entry=", entry, " TP=", tp);
+      Print("Buy Now: butuh SL < Entry < TP2. SL=", sl, " Entry=", entry, " TP=", tp);
       return;
    }
 
@@ -1422,7 +1422,7 @@ void PlaceBuyNow() {
    sl = NormalizeDouble(sl, _Digits);
    tp = NormalizeDouble(tp, _Digits);
    if(trade.Buy(lot, _Symbol, 0, sl, tp, "BuyNow"))
-      Print("Buy Now: Lot=", lot, ", SL=", sl, ", TP5=", tp,
+      Print("Buy Now: Lot=", lot, ", SL=", sl, ", TP2=", tp,
             " | posisi hari ini ", CountPositionsOpenedToday(), "/", InpMaxTradesPerDay);
    else
       Print("Failed to execute Buy order. Error: ", GetLastError());
@@ -1443,10 +1443,10 @@ void PlaceSellNow() {
 
    double entry = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double sl = GetInputValue("Sell_Stoploss");
-   double tp = GetDrawnLinePrice(PREF+"Calc_S_TP5");
+   double tp = GetDrawnLinePrice(PREF+"Calc_S_TP2");
 
    if(sl <= entry || tp >= entry || tp <= 0.0) {
-      Print("Sell Now: butuh TP5 < Entry < SL. SL=", sl, " Entry=", entry, " TP=", tp);
+      Print("Sell Now: butuh TP2 < Entry < SL. SL=", sl, " Entry=", entry, " TP=", tp);
       return;
    }
 
@@ -1459,7 +1459,7 @@ void PlaceSellNow() {
    sl = NormalizeDouble(sl, _Digits);
    tp = NormalizeDouble(tp, _Digits);
    if(trade.Sell(lot, _Symbol, 0, sl, tp, "SellNow"))
-      Print("Sell Now: Lot=", lot, ", SL=", sl, ", TP5=", tp,
+      Print("Sell Now: Lot=", lot, ", SL=", sl, ", TP2=", tp,
             " | posisi hari ini ", CountPositionsOpenedToday(), "/", InpMaxTradesPerDay);
    else
       Print("Failed to execute Sell order. Error: ", GetLastError());
@@ -1531,7 +1531,7 @@ void CreateDashboard() {
    CreateLabel("Title", (PANEL_W / 2) + 20, HEADER_Y + 2, "SND Quick Retest", clrWhite);
    CreateObject("Panel", OBJ_RECTANGLE_LABEL, 0, 10, UI_Y, PANEL_W, PANEL_H, clrDarkSlateGray);
    
-   CreateLabel("LblLayers", 20, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "3");
+   CreateLabel("LblLayers", 20, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "2");
    CreateButton("BtnLotMode", 260, UI_Y+12, 100, 25, "Lot", clrDarkSlateGray, clrOrange);
    CreateEdit("InpLot", 370, UI_Y+18, 100, 25, "0.12");
    CreateCalcLotLabel();
