@@ -630,9 +630,9 @@ void ScanSD() {
             int mitPct = (int)MathRound(deepestMit / zoneWidth * 100.0);
             if(mitPct > 100) mitPct = 100;
 
-            string labelText = "  ● Fresh " + type;
+            string labelText = "● Fresh " + type;
             if(mitPct > 0)
-               labelText = "  ●  " + IntegerToString(mitPct) + "% " + type;
+               labelText = "● " + IntegerToString(mitPct) + "% " + type;
 
             datetime startTime = iTime(_Symbol, _Period, i);
             datetime endTime = TimeCurrent() + (PeriodSeconds() * 8);

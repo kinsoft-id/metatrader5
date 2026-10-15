@@ -63,7 +63,7 @@ input int            InpMaxNumSR     = 6;                // Maximum Number of S/
 input int            InpLoopback     = 290;              // Loopback Period
 
 input group "Colors"
-input color          InpResColor     = clrRed;           // Resistance Color
+input color          InpResColor     = C'255,182,193';   // Resistance Color (pink muda)
 input color          InpSupColor     = clrLime;          // Support Color
 input color          InpInChColor    = clrGray;          // Color When Price in Channel
 input int            InpFillTransp   = 75;               // Channel Fill Transparency (0-100)
@@ -128,8 +128,16 @@ int ClampInt(const int v, const int lo, const int hi)
 color ApplyTransp(const color clr, const int transp)
 {
    int t = ClampInt(transp, 0, 100);
-   uchar alpha = (uchar)MathRound(2.55 * (100 - t));
-   return (color)ColorToARGB(clr, alpha);
+   if(t <= 0)
+      return clr;
+
+   const int r = (int)(clr & 0xFF);
+   const int g = (int)((clr >> 8) & 0xFF);
+   const int b = (int)((clr >> 16) & 0xFF);
+   const int mixR = (r * (100 - t) + 255 * t) / 100;
+   const int mixG = (g * (100 - t) + 255 * t) / 100;
+   const int mixB = (b * (100 - t) + 255 * t) / 100;
+   return (color)(mixR | (mixG << 8) | (mixB << 16));
 }
 
 //+------------------------------------------------------------------+
