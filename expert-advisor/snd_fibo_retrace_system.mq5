@@ -259,11 +259,13 @@ void OnTimer()
    static bool quotesDrawn = false;
    if(!quotesDrawn)
    {
-      DrawNativeLabel(PREF + "Check1", "Break Structure, Utk Break Mayor = Hati2 False Break, entry Choppy dulu", (PANEL_W + 20), 75, clrBlack);
-      DrawNativeLabel(PREF + "Check2", "Range break 0-23.6 limit masih di momemtum zigzag sebelumnya", (PANEL_W + 20), 100, clrBlack);
-      DrawNativeLabel(PREF + "Check3", "Jika sudah menyentuh garis fibo 23.6, maka pindahkan Momentum ZigZag ke yang terbaru", (PANEL_W + 20), 125, clrBlack);
-      DrawNativeLabel(PREF + "Check4", "Range break 23.6-38.2 limit 78.6, 38.2-50.0 Choppy, 50.0-78.6 Volatile", (PANEL_W + 20), 150, clrBlack);
-      DrawNativeLabel(PREF + "Check5", "Setelah break, Cek retrace sebelumnya ada di level berapa, kemungkinan retracement akan terjadi di level tersebut", (PANEL_W + 20), 175, clrBlack);
+      int qy = UI_Y + PANEL_H + 12;
+      DrawNativeLabel(PREF + "Check1", "1. Break Struktur, Waspada false break, entry awal choppy", 20, qy, clrBlack);
+      DrawNativeLabel(PREF + "Check2", "2. Range break 0-23.6, limit = momentum zigzag sebelumnya", 20, qy + 20, clrBlack);
+      DrawNativeLabel(PREF + "Check3", "3. Break body 23.6, pindahkan momentum zigzag ke terbaru", 20, qy + 40, clrBlack);
+      DrawNativeLabel(PREF + "Check4", "4. 23.6-38.2=limit 78.6; 38.2-50.0=choppy; 50.0-78.6=volatile", 20, qy + 60, clrBlack);
+      DrawNativeLabel(PREF + "Check5", "5. Setelah break, cek retrace sebelumnya, kemungkinan retrace di situ", 20, qy + 80, clrBlack);
+ 
       
       quotesDrawn = true;
    }
@@ -635,16 +637,38 @@ void GetHighImpactUSDNews()
 // --- SHOW / HIDE QUOTE LABELS ---
 void ApplyQuoteVisibility()
 {
-   int yCheck1 = IsQuoteVisible ? 75  : UI_OFFSCREEN;
-   int yCheck2 = IsQuoteVisible ? 100 : UI_OFFSCREEN;
-   int yCheck3 = IsQuoteVisible ? 125 : UI_OFFSCREEN;
-   int yQuote  = IsQuoteVisible ? 150 : UI_OFFSCREEN;
+   int qy = UI_Y + PANEL_H + 12;
+   int y1 = IsQuoteVisible ? qy      : UI_OFFSCREEN;
+   int y2 = IsQuoteVisible ? qy + 20 : UI_OFFSCREEN;
+   int y3 = IsQuoteVisible ? qy + 40 : UI_OFFSCREEN;
+   int y4 = IsQuoteVisible ? qy + 60 : UI_OFFSCREEN;
+   int y5 = IsQuoteVisible ? qy + 80 : UI_OFFSCREEN;
 
-   if(ObjectFind(0, PREF + "Check1") >= 0) ObjectSetInteger(0, PREF + "Check1", OBJPROP_YDISTANCE, yCheck1);
-   if(ObjectFind(0, PREF + "Check2") >= 0) ObjectSetInteger(0, PREF + "Check2", OBJPROP_YDISTANCE, yCheck2);
-   if(ObjectFind(0, PREF + "Check3") >= 0) ObjectSetInteger(0, PREF + "Check3", OBJPROP_YDISTANCE, yCheck3);
-   if(ObjectFind(0, PREF + "Check4")  >= 0) ObjectSetInteger(0, PREF + "Check4",  OBJPROP_YDISTANCE, yQuote);
-   if(ObjectFind(0, PREF + "Check5")  >= 0) ObjectSetInteger(0, PREF + "Check5",  OBJPROP_YDISTANCE, yQuote);
+   if(ObjectFind(0, PREF + "Check1") >= 0)
+   {
+      ObjectSetInteger(0, PREF + "Check1", OBJPROP_XDISTANCE, 20);
+      ObjectSetInteger(0, PREF + "Check1", OBJPROP_YDISTANCE, y1);
+   }
+   if(ObjectFind(0, PREF + "Check2") >= 0)
+   {
+      ObjectSetInteger(0, PREF + "Check2", OBJPROP_XDISTANCE, 20);
+      ObjectSetInteger(0, PREF + "Check2", OBJPROP_YDISTANCE, y2);
+   }
+   if(ObjectFind(0, PREF + "Check3") >= 0)
+   {
+      ObjectSetInteger(0, PREF + "Check3", OBJPROP_XDISTANCE, 20);
+      ObjectSetInteger(0, PREF + "Check3", OBJPROP_YDISTANCE, y3);
+   }
+   if(ObjectFind(0, PREF + "Check4") >= 0)
+   {
+      ObjectSetInteger(0, PREF + "Check4", OBJPROP_XDISTANCE, 20);
+      ObjectSetInteger(0, PREF + "Check4", OBJPROP_YDISTANCE, y4);
+   }
+   if(ObjectFind(0, PREF + "Check5") >= 0)
+   {
+      ObjectSetInteger(0, PREF + "Check5", OBJPROP_XDISTANCE, 20);
+      ObjectSetInteger(0, PREF + "Check5", OBJPROP_YDISTANCE, y5);
+   }
 }
 
 // --- HELPER MAKER OBJEK DASHBOARD NATIVE (ANTI-TEKS KEPOTONG) ---
@@ -2334,11 +2358,11 @@ int GetInitialY(string name) {
    if(name == PREF+"Title") return HEADER_Y + 20;
    if(name == PREF+"Live_Clock") return 50;
    if(name == PREF+"HardStop") return 25;
-   if(name == PREF+"Check1") return 75;
-   if(name == PREF+"Check2") return 100;
-   if(name == PREF+"Check3") return 125;
-   if(name == PREF+"Check4") return 150;
-   if(name == PREF+"Check5") return 175;
+   if(name == PREF+"Check1") return UI_Y + PANEL_H + 12;
+   if(name == PREF+"Check2") return UI_Y + PANEL_H + 32;
+   if(name == PREF+"Check3") return UI_Y + PANEL_H + 52;
+   if(name == PREF+"Check4") return UI_Y + PANEL_H + 72;
+   if(name == PREF+"Check5") return UI_Y + PANEL_H + 92;
    if(name == PREF+"Panel") return UI_Y;
    if(name == PREF+"LblLayers") return UI_Y + 26;
    if(name == PREF+"InpLayers" || name == PREF+"BtnLotMode" || name == PREF+"InpLot") return UI_Y + 14;

@@ -593,53 +593,50 @@ void ScanSD() {
             if(type == "RBR" && legOutClose <= baseHigh) continue;
             if(type == "DBD" && legOutClose >= baseLow) continue;
 
-            // --- KUNCI LOGIKA BARU: MENGHITUNG JUMLAH SENTUHAN (RETEST) ---
-            int touchCount = 0;
+            // --- MITIGASI: PERSEN DARI LEBAR AREA YANG SUDAH TERMASUK HARGA ---
+            double zoneWidth = baseHigh - baseLow;
+            if(zoneWidth <= 0.0) continue;
+
+            double deepestMit = 0.0;
             bool isFullMitigated = false;
 
-            // Lakukan ke belakang dari candle i-1 sampai candle terbaru (index 0)
             for(int k = i - 1; k >= 0; k--) {
                double candleHigh = iHigh(_Symbol, _Period, k);
                double candleLow  = iLow(_Symbol, _Period, k);
 
-               if(legOutUp) { 
-                  // Untuk Demand Zone (RBR/DBR):
-                  // Jika Low menembus Base Low, artinya area jebol total (Full Mitigated)
-                  if(candleLow < baseLow) { 
-                     isFullMitigated = true; 
-                     break; 
+               if(legOutUp) {
+                  if(candleLow < baseLow) {
+                     isFullMitigated = true;
+                     break;
                   }
-                  // Jika Low sempat masuk ke dalam area Base High, hitung sebagai sentuhan
-                  if(candleLow <= baseHigh) { 
-                     touchCount++; 
+                  if(candleLow <= baseHigh) {
+                     double pen = baseHigh - MathMax(candleLow, baseLow);
+                     if(pen > deepestMit) deepestMit = pen;
                   }
-               } else { 
-                  // Untuk Supply Zone (DBD/RBD):
-                  // Jika High menembus Base High, artinya area jebol total (Full Mitigated)
-                  if(candleHigh > baseHigh) { 
-                     isFullMitigated = true; 
-                     break; 
+               } else {
+                  if(candleHigh > baseHigh) {
+                     isFullMitigated = true;
+                     break;
                   }
-                  // Jika High sempat masuk ke dalam area Base Low, hitung sebagai sentuhan
-                  if(candleHigh >= baseLow) { 
-                     touchCount++; 
+                  if(candleHigh >= baseLow) {
+                     double pen = MathMin(candleHigh, baseHigh) - baseLow;
+                     if(pen > deepestMit) deepestMit = pen;
                   }
                }
             }
-            
-            // Jika area sudah tertembus total (Broken Zone), lewati dan jangan digambar
-            if(isFullMitigated) continue; 
-            
-            // --- MENENTUKAN TEKS LABEL BERDASARKAN SENTUHAN + TIPE ZONA ---
+
+            if(isFullMitigated) continue;
+
+            int mitPct = (int)MathRound(deepestMit / zoneWidth * 100.0);
+            if(mitPct > 100) mitPct = 100;
+
             string labelText = "  ● Fresh " + type;
-            if(touchCount > 0) {
-               labelText = "  ● Tested " + type + " " + IntegerToString(touchCount) + "x";
-            }
-            
+            if(mitPct > 0)
+               labelText = "  ●  " + IntegerToString(mitPct) + "% " + type;
+
             datetime startTime = iTime(_Symbol, _Period, i);
-            datetime endTime = TimeCurrent() + (PeriodSeconds() * 100);
-            
-            // Gambar Kotak S&D
+            datetime endTime = TimeCurrent() + (PeriodSeconds() * 8);
+
             string name = ZONE_PREF + type + "_" + IntegerToString(i);
             if(ObjectCreate(0, name, OBJ_RECTANGLE, 0, startTime, baseLow, endTime, baseHigh)) {
                color clr = legOutUp ? clrSkyBlue : clrLightSalmon;
@@ -647,26 +644,28 @@ void ScanSD() {
                ObjectSetInteger(0, name, OBJPROP_FILL, true);
                ObjectSetInteger(0, name, OBJPROP_BACK, true);
                ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-               
-               // --- TOMBOL INTERAKTIF DENGAN LABEL DINAMIS ---
+
                string btnName = ZONE_PREF + "BTN_" + type + "_" + IntegerToString(i);
-               double btnPrice = legOutUp ? baseLow : baseHigh; 
-               
-               ObjectCreate(0, btnName, OBJ_TEXT, 0, endTime, btnPrice);
-               ObjectSetString(0, btnName, OBJPROP_TEXT, labelText); // Fresh RBR/DBD atau Tested RBD/DBR Nx
+               datetime btnTime = iTime(_Symbol, _Period, 0) + PeriodSeconds(_Period) * 3;
+               double lastPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+               double btnPrice = lastPrice;
+               if(lastPrice > baseHigh) btnPrice = baseHigh;
+               else if(lastPrice < baseLow) btnPrice = baseLow;
+
+               ObjectCreate(0, btnName, OBJ_TEXT, 0, btnTime, btnPrice);
+               ObjectSetString(0, btnName, OBJPROP_TEXT, labelText);
                ObjectSetString(0, btnName, OBJPROP_FONT, "Arial Bold");
-               ObjectSetInteger(0, btnName, OBJPROP_FONTSIZE, 9); // Ukuran teks sedikit diperkecil agar pas di layar
-               
-               // Warna tombol: Fresh diberi warna cerah, Tested diberi warna abu-abu/redup (opsional agar kontras)
+               ObjectSetInteger(0, btnName, OBJPROP_FONTSIZE, 10);
+               ObjectSetInteger(0, btnName, OBJPROP_ANCHOR, ANCHOR_LEFT);
+
                color btnColor = legOutUp ? clrBlue : clrRed;
-               if(touchCount > 0) btnColor = clrSlateGray; // Mengubah warna ke abu-abu jika sudah tersentuh
-               
+               if(mitPct > 0) btnColor = clrSlateGray;
+
                ObjectSetInteger(0, btnName, OBJPROP_COLOR, btnColor);
-               
                ObjectSetInteger(0, btnName, OBJPROP_SELECTABLE, true);
                ObjectSetInteger(0, btnName, OBJPROP_SELECTED, false);
-               
-               zonesFound++; 
+
+               zonesFound++;
             }
          }
       }
