@@ -44,14 +44,16 @@ bool IsDashboardVisible = true;
 bool IsQuoteVisible = true;
 bool IsSDScanning = false;
 bool IsAutoLimit = false;
+bool IsAutoLimitRev = false;
 datetime g_lastAutoZoneBar = 0;
+datetime g_lastAutoRevBar = 0;
 bool IsAutoLot = true;
 double g_lastManualLot = 0.01;
 double g_lastRiskPct = 0.12;
 int UI_Y = 100;      
 int HEADER_Y = 50;   
 int PANEL_W = 500;   
-int PANEL_H = 750;   
+int PANEL_H = 790;   
 int UI_OFFSCREEN = -2000; 
 
 // --- Function Declarations ---
@@ -130,8 +132,10 @@ void   ActionDelSell();
 void   ActionClosePositions();
 void   ActionCloseOrders();
 void   ActionAutoLimit();
+void   ActionAutoLimitRev();
 void   ActionReset();
 void   ApplyAutoLimitUI();
+void   ApplyAutoLimitRevUI();
 bool   HotkeyModifiersFree();
 void   HandleHotkey(const long key);
 
@@ -277,15 +281,31 @@ void ApplyAutoLimitUI()
    if(ObjectFind(0, PREF+"BtnAutoLmt") < 0) return;
    if(IsAutoLimit)
    {
-      ObjectSetString(0, PREF+"BtnAutoLmt", OBJPROP_TEXT, "Auto: ON [N]");
+      ObjectSetString(0, PREF+"BtnAutoLmt", OBJPROP_TEXT, "RBR/DBD: ON [N]");
       ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_BGCOLOR, clrGreen);
       ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_COLOR, clrWhite);
    }
    else
    {
-      ObjectSetString(0, PREF+"BtnAutoLmt", OBJPROP_TEXT, "Auto: OFF [N]");
+      ObjectSetString(0, PREF+"BtnAutoLmt", OBJPROP_TEXT, "RBR/DBD: OFF [N]");
       ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_BGCOLOR, clrGray);
       ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_COLOR, clrBlack);
+   }
+}
+void ApplyAutoLimitRevUI()
+{
+   if(ObjectFind(0, PREF+"BtnAutoRev") < 0) return;
+   if(IsAutoLimitRev)
+   {
+      ObjectSetString(0, PREF+"BtnAutoRev", OBJPROP_TEXT, "DBR/RBD: ON [M]");
+      ObjectSetInteger(0, PREF+"BtnAutoRev", OBJPROP_BGCOLOR, clrGreen);
+      ObjectSetInteger(0, PREF+"BtnAutoRev", OBJPROP_COLOR, clrWhite);
+   }
+   else
+   {
+      ObjectSetString(0, PREF+"BtnAutoRev", OBJPROP_TEXT, "DBR/RBD: OFF [M]");
+      ObjectSetInteger(0, PREF+"BtnAutoRev", OBJPROP_BGCOLOR, clrGray);
+      ObjectSetInteger(0, PREF+"BtnAutoRev", OBJPROP_COLOR, clrBlack);
    }
 }
 void ActionAutoLimit()
@@ -293,6 +313,12 @@ void ActionAutoLimit()
    IsAutoLimit = !IsAutoLimit;
    ApplyAutoLimitUI();
    Print("Auto Limit Order RBR/DBD: ", IsAutoLimit ? "ON" : "OFF");
+}
+void ActionAutoLimitRev()
+{
+   IsAutoLimitRev = !IsAutoLimitRev;
+   ApplyAutoLimitRevUI();
+   Print("Auto Limit Order DBR/RBD: ", IsAutoLimitRev ? "ON" : "OFF");
 }
 void ActionReset()
 {
@@ -302,6 +328,7 @@ void ActionReset()
    ObjectsDeleteAll(0, ZONE_PREF);
    IsSDScanning = false;
    g_lastAutoZoneBar = 0;
+   g_lastAutoRevBar = 0;
    ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "Scan S&D [A]");
    ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrDarkGreen);
    if(IsAutoLot && ObjectFind(0, PREF+"LblCalcLot") >= 0)
@@ -329,6 +356,7 @@ void HandleHotkey(const long key)
    else if(key == 80) ActionClosePositions(); // P
    else if(key == 79) ActionCloseOrders();   // O
    else if(key == 78) ActionAutoLimit();     // N
+   else if(key == 77) ActionAutoLimitRev();  // M
    else if(key == 82) ActionReset();         // R
    else return;
 
@@ -412,6 +440,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       else if(sparam == PREF+"ClosePos") { ActionClosePositions(); ObjectSetInteger(0, PREF+"ClosePos", OBJPROP_STATE, false); }
       else if(sparam == PREF+"CloseOrd") { ActionCloseOrders(); ObjectSetInteger(0, PREF+"CloseOrd", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BtnAutoLmt") { ActionAutoLimit(); ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnAutoRev") { ActionAutoLimitRev(); ObjectSetInteger(0, PREF+"BtnAutoRev", OBJPROP_STATE, false); }
       else if(sparam == PREF+"Reset") { ActionReset(); ObjectSetInteger(0, PREF+"Reset", OBJPROP_STATE, false); }
       // --- DETEKSI KLIK TOMBOL BULAT S&D ---
       else if(StringFind(sparam, ZONE_PREF + "BTN_") == 0) {
@@ -479,13 +508,24 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 
 void TryAutoLimitFromZone(const string type, const double baseLow, const double baseHigh)
 {
-   if(!IsAutoLimit) return;
-   if(type != "RBR" && type != "DBD") return;
+   bool isSnd = (type == "RBR" || type == "DBD");
+   bool isRev = (type == "DBR" || type == "RBD");
+   if(isSnd && !IsAutoLimit) return;
+   if(isRev && !IsAutoLimitRev) return;
+   if(!isSnd && !isRev) return;
    if(baseLow <= 0.0 || baseHigh <= 0.0 || baseHigh <= baseLow) return;
 
    datetime zoneBar = iTime(_Symbol, _Period, 1);
-   if(zoneBar > 0 && zoneBar == g_lastAutoZoneBar) return;
-   g_lastAutoZoneBar = zoneBar;
+   if(isSnd)
+   {
+      if(zoneBar > 0 && zoneBar == g_lastAutoZoneBar) return;
+      g_lastAutoZoneBar = zoneBar;
+   }
+   else
+   {
+      if(zoneBar > 0 && zoneBar == g_lastAutoRevBar) return;
+      g_lastAutoRevBar = zoneBar;
+   }
 
    if(ObjectFind(0, PREF+"Line_Floor") < 0 || ObjectFind(0, PREF+"Line_Ceiling") < 0)
       CreateDrawingLines();
@@ -494,14 +534,14 @@ void TryAutoLimitFromZone(const string type, const double baseLow, const double 
    ObjectSetDouble(0, PREF+"Line_Ceiling", OBJPROP_PRICE, baseHigh);
    CalculateAndDrawAll();
 
-   if(type == "RBR")
+   if(type == "RBR" || type == "DBR")
    {
-      Print("Auto Limit: RBR terbentuk. Pasang Buy Order.");
+      Print("Auto Limit: ", type, " terbentuk. Pasang Buy Order.");
       PlaceBuyOrder();
    }
    else
    {
-      Print("Auto Limit: DBD terbentuk. Pasang Sell Order.");
+      Print("Auto Limit: ", type, " terbentuk. Pasang Sell Order.");
       PlaceSellOrder();
    }
 }
@@ -578,11 +618,15 @@ void ScanSD() {
             if(!legInUp && legOutUp)  { type = "DBR"; shouldDraw = InpShowDBR; }
             if(legInUp && !legOutUp)  { type = "RBD"; shouldDraw = InpShowRBD; }
 
-            if(!shouldDraw) continue;
+            bool autoWanted = (i == 1) && (
+               ((type == "RBR" || type == "DBD") && IsAutoLimit) ||
+               ((type == "DBR" || type == "RBD") && IsAutoLimitRev)
+            );
+            if(!shouldDraw && !autoWanted) continue;
 
-            // RBR: Close Leg Out di atas base | DBD: Close Leg Out di bawah base
-            if(type == "RBR" && legOutClose <= baseHigh) continue;
-            if(type == "DBD" && legOutClose >= baseLow) continue;
+            // RBR/DBR: Close Leg Out di atas base | DBD/RBD: Close Leg Out di bawah base
+            if((type == "RBR" || type == "DBR") && legOutClose <= baseHigh) continue;
+            if((type == "DBD" || type == "RBD") && legOutClose >= baseLow) continue;
 
             // --- MITIGASI: PERSEN DARI LEBAR AREA YANG SUDAH TERMASUK HARGA ---
             double zoneWidth = baseHigh - baseLow;
@@ -1653,9 +1697,11 @@ void CreateDashboard() {
    CreateButton("CloseOrd", 20, UI_Y + 520, PANEL_W-40, 30, "Close All Orders [O]", clrMaroon, clrWhite);
    CreateButton("BuyNow", 20, UI_Y + 560, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
    CreateButton("SellNow", 270, UI_Y + 560, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
-   CreateButton("BtnAutoLmt", 20, UI_Y + 600, 200, 30, "Auto: OFF [N]", clrGray, clrBlack);
-   CreateButton("Reset", 270, UI_Y + 600, 200, 30, "Reset [R]", clrGray, clrBlack);
+   CreateButton("BtnAutoLmt", 20, UI_Y + 600, 200, 30, "RBR/DBD: OFF [N]", clrGray, clrBlack);
+   CreateButton("BtnAutoRev", 270, UI_Y + 600, 200, 30, "DBR/RBD: OFF [M]", clrGray, clrBlack);
+   CreateButton("Reset", 20, UI_Y + 640, PANEL_W-40, 30, "Reset [R]", clrGray, clrBlack);
    ApplyAutoLimitUI();
+   ApplyAutoLimitRevUI();
    ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_ZORDER, 10);
 
    // Tambahkan ini di setiap fungsi pembuatan tombol/label dashboard Anda
@@ -1668,6 +1714,7 @@ void CreateDashboard() {
    ObjectSetInteger(0, "BuyNow", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
    ObjectSetInteger(0, "SellNow", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
    ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, PREF+"BtnAutoRev", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"Reset", OBJPROP_ZORDER, 10);
 
 
@@ -1739,6 +1786,7 @@ int GetInitialY(string name) {
    if(name == PREF+"ClosePos") return UI_Y + 480;
    if(name == PREF+"CloseOrd") return UI_Y + 520;
    if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 560;
-   if(name == PREF+"Reset" || name == PREF+"BtnAutoLmt") return UI_Y + 600;
+   if(name == PREF+"BtnAutoLmt" || name == PREF+"BtnAutoRev") return UI_Y + 600;
+   if(name == PREF+"Reset") return UI_Y + 640;
    return UI_Y;
 }
