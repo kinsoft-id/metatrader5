@@ -15,14 +15,6 @@ input bool   InpShowDBR     = false;  // Tampilkan Drop Base Rally
 input bool   InpShowRBD     = false;  // Tampilkan Rally Base Drop
 input int InpMaxZones = 10; // Maksimal zona yang ditampilkan
 
-// Struktur untuk menyimpan data berita yang sudah disaring
-struct USDNewsData {
-   datetime time;
-   string   name;
-};
-
-USDNewsData listNews[3]; // Maksimal menampung 3 berita terdekat
-
 enum ENUM_LOT_MODE
 {
    LOT_MANUAL    = 0, // Lot manual
@@ -39,6 +31,7 @@ input int           InpMaxTradesPerDay = 24;     // Max trades per hari (dari hi
 input int           InpMaxOpenSimultaneous = 5;  // Max posisi/order terbuka bersamaan
 input bool          InpHardDailyStop = true;     // Hard Daily Stop (close semua + disable)
 input double        InpMaxDailyLossPercent = 2.0; // Hard stop jika Daily PnL+floating <= -%
+input int           InpPendingExpireMinutes = 60; // Cancel pending jika tidak kejemput (menit)
 input ulong InpMagicNumber = 1111; // Magic Number (Harus beda tiap chart)
 
 
@@ -50,6 +43,8 @@ string ZONE_PREF;
 bool IsDashboardVisible = true;
 bool IsQuoteVisible = true;
 bool IsSDScanning = false;
+bool IsAutoLimit = false;
+datetime g_lastAutoZoneBar = 0;
 bool IsAutoLot = true;
 double g_lastManualLot = 0.01;
 double g_lastRiskPct = 0.12;
@@ -76,7 +71,7 @@ void PlaceSellNow();
 bool DrawingLinesActive();
 bool PriceInDrawArea(double price);
 double GetDrawnLinePrice(string name);
-void GetHighImpactUSDNews();
+void TryAutoLimitFromZone(const string type, const double baseLow, const double baseHigh);
 int  GetInitialY(string name);
 void CreateObject(string name, ENUM_OBJECT type, int win, int x, int y, int w, int h, color clr);
 void CreateLabel(string name, int x, int y, string text, color clr);
@@ -119,6 +114,11 @@ bool   IsHardStopActive();
 void   FlattenAccount();
 void   TriggerHardDailyStop(const double pnlPct);
 void   CheckHardDailyStop();
+void   ManagePendingOrders();
+bool   IsBuyPendingType(const long type);
+bool   IsSellPendingType(const long type);
+bool   PendingHitTp2(const bool isBuy, const double entry, const double sl);
+bool   Layer2TpAlreadyHit(const bool forBuy);
 void   UpdateHardStopLabel();
 bool   IsTradingBlocked(string &reason, const int extraPositions = 0);
 void   ActionDrawLine();
@@ -129,8 +129,9 @@ void   ActionDelBuy();
 void   ActionDelSell();
 void   ActionClosePositions();
 void   ActionCloseOrders();
-void   ActionGetNews();
+void   ActionAutoLimit();
 void   ActionReset();
+void   ApplyAutoLimitUI();
 bool   HotkeyModifiersFree();
 void   HandleHotkey(const long key);
 
@@ -177,6 +178,7 @@ void OnDeinit(const int reason)
 
 void OnTick() { 
    CheckHardDailyStop();
+   ManagePendingOrders();
    UpdateLiveClock();
    ApplyQuoteVisibility();
 
@@ -202,6 +204,7 @@ void OnTimer()
    }
    UpdateLiveClock();
    CheckHardDailyStop();
+   ManagePendingOrders();
    ChartRedraw();
 }
 
@@ -269,7 +272,28 @@ void ActionDelSell()
 }
 void ActionClosePositions() { CloseAllPositions(); }
 void ActionCloseOrders()    { CloseAllOrders(); }
-void ActionGetNews()        { GetHighImpactUSDNews(); }
+void ApplyAutoLimitUI()
+{
+   if(ObjectFind(0, PREF+"BtnAutoLmt") < 0) return;
+   if(IsAutoLimit)
+   {
+      ObjectSetString(0, PREF+"BtnAutoLmt", OBJPROP_TEXT, "Auto: ON [N]");
+      ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_BGCOLOR, clrGreen);
+      ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_COLOR, clrWhite);
+   }
+   else
+   {
+      ObjectSetString(0, PREF+"BtnAutoLmt", OBJPROP_TEXT, "Auto: OFF [N]");
+      ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_BGCOLOR, clrGray);
+      ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_COLOR, clrBlack);
+   }
+}
+void ActionAutoLimit()
+{
+   IsAutoLimit = !IsAutoLimit;
+   ApplyAutoLimitUI();
+   Print("Auto Limit Order RBR/DBD: ", IsAutoLimit ? "ON" : "OFF");
+}
 void ActionReset()
 {
    ObjectsDeleteAll(0, PREF+"Line_");
@@ -277,6 +301,7 @@ void ActionReset()
    ObjectsDeleteAll(0, PREF+"Layer_");
    ObjectsDeleteAll(0, ZONE_PREF);
    IsSDScanning = false;
+   g_lastAutoZoneBar = 0;
    ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "Scan S&D [A]");
    ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrDarkGreen);
    if(IsAutoLot && ObjectFind(0, PREF+"LblCalcLot") >= 0)
@@ -303,7 +328,7 @@ void HandleHotkey(const long key)
    else if(key == 87) ActionDelSell();       // W
    else if(key == 80) ActionClosePositions(); // P
    else if(key == 79) ActionCloseOrders();   // O
-   else if(key == 78) ActionGetNews();       // N
+   else if(key == 78) ActionAutoLimit();     // N
    else if(key == 82) ActionReset();         // R
    else return;
 
@@ -386,7 +411,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       }
       else if(sparam == PREF+"ClosePos") { ActionClosePositions(); ObjectSetInteger(0, PREF+"ClosePos", OBJPROP_STATE, false); }
       else if(sparam == PREF+"CloseOrd") { ActionCloseOrders(); ObjectSetInteger(0, PREF+"CloseOrd", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"GetNews") { ActionGetNews(); ObjectSetInteger(0, PREF+"GetNews", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnAutoLmt") { ActionAutoLimit(); ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_STATE, false); }
       else if(sparam == PREF+"Reset") { ActionReset(); ObjectSetInteger(0, PREF+"Reset", OBJPROP_STATE, false); }
       // --- DETEKSI KLIK TOMBOL BULAT S&D ---
       else if(StringFind(sparam, ZONE_PREF + "BTN_") == 0) {
@@ -452,66 +477,32 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    }
 }
 
-
-// --- FUNGSI SEARCH BERITA USD HIGH IMPACT (VERSI 100% UNIVERSAL & ANTI-ERROR) ---
-void GetHighImpactUSDNews()
+void TryAutoLimitFromZone(const string type, const double baseLow, const double baseHigh)
 {
-   // 1. Kosongkan data lama
-   for(int k=0; k<3; k++) { listNews[k].time = 0; listNews[k].name = ""; }
+   if(!IsAutoLimit) return;
+   if(type != "RBR" && type != "DBD") return;
+   if(baseLow <= 0.0 || baseHigh <= 0.0 || baseHigh <= baseLow) return;
 
-   MqlCalendarValue values[];
-   datetime fromTime = TimeCurrent();         
-   datetime toTime   = fromTime + 24 * 3600;  // 24 jam ke depan
+   datetime zoneBar = iTime(_Symbol, _Period, 1);
+   if(zoneBar > 0 && zoneBar == g_lastAutoZoneBar) return;
+   g_lastAutoZoneBar = zoneBar;
 
-   // Ambil data kalender dari server
-   int totalEvents = CalendarValueHistory(values, fromTime, toTime);
-   if(totalEvents <= 0) return;
+   if(ObjectFind(0, PREF+"Line_Floor") < 0 || ObjectFind(0, PREF+"Line_Ceiling") < 0)
+      CreateDrawingLines();
 
-   int newsCount = 0;
-   
-   // 2. Loop data berita yang masuk
-   for(int i = 0; i < totalEvents && newsCount < 3; i++)
+   ObjectSetDouble(0, PREF+"Line_Floor", OBJPROP_PRICE, baseLow);
+   ObjectSetDouble(0, PREF+"Line_Ceiling", OBJPROP_PRICE, baseHigh);
+   CalculateAndDrawAll();
+
+   if(type == "RBR")
    {
-      MqlCalendarEvent event;
-      
-      // Ambil detail event berdasarkan event_id
-      if(CalendarEventById(values[i].event_id, event))
-      {
-         // Trik Utama: Ambil data negara menggunakan fungsi terpisah untuk menghindari error properti struct
-         MqlCalendarCountry country;
-         if(CalendarCountryById(event.country_id, country))
-         {
-            // Cek apakah mata uangnya USD (country.currency) ATAU kode negaranya US (country.code)
-            // Dan pastikan dampaknya adalah HIGH IMPACT
-            if((country.code == "US" || country.currency == "USD") && event.importance == CALENDAR_IMPORTANCE_HIGH)
-            {
-               listNews[newsCount].time = values[i].time;
-               listNews[newsCount].name = event.name;
-               newsCount++;
-            }
-         }
-      }
+      Print("Auto Limit: RBR terbentuk. Pasang Buy Order.");
+      PlaceBuyOrder();
    }
-
-   for(int i = 0; i < 3; i++)
+   else
    {
-      string labelName = PREF + "Lbl_News_Row_" + IntegerToString(i);
-      string newsText  = "- No Upcoming High USD News -";
-
-      if(listNews[i].time > 0)
-      {
-         string timeStr = TimeToString(listNews[i].time, TIME_MINUTES);
-         newsText = timeStr + " | " + listNews[i].name;
-         
-         if(StringLen(newsText) > 38) newsText = StringSubstr(newsText, 0, 38) + "...";
-      }
-      else if(i > 0)
-      {
-         newsText = ""; // Kosongkan baris 2 & 3 jika tidak ada event berita lagi
-      }
-
-      // Cetak berurutan ke bawah (kelipatan 18 pixel dari koordinat Y=200)
-      DrawNativeLabel(labelName, newsText, 20, 740 + (i * 18), clrRed);
+      Print("Auto Limit: DBD terbentuk. Pasang Sell Order.");
+      PlaceSellOrder();
    }
 }
 
@@ -666,6 +657,8 @@ void ScanSD() {
                ObjectSetInteger(0, btnName, OBJPROP_SELECTED, false);
 
                zonesFound++;
+               if(i == 1)
+                  TryAutoLimitFromZone(type, baseLow, baseHigh);
             }
          }
       }
@@ -1133,6 +1126,112 @@ void CheckHardDailyStop()
       UpdateHardStopLabel();
 }
 
+bool IsBuyPendingType(const long type)
+{
+   return (type == ORDER_TYPE_BUY_LIMIT || type == ORDER_TYPE_BUY_STOP || type == ORDER_TYPE_BUY_STOP_LIMIT);
+}
+
+bool IsSellPendingType(const long type)
+{
+   return (type == ORDER_TYPE_SELL_LIMIT || type == ORDER_TYPE_SELL_STOP || type == ORDER_TYPE_SELL_STOP_LIMIT);
+}
+
+bool PendingHitTp2(const bool isBuy, const double entry, const double sl)
+{
+   if(entry <= 0.0 || sl <= 0.0) return false;
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(isBuy)
+   {
+      double risk = entry - sl;
+      if(risk <= 0.0) return false;
+      return (bid >= entry + 2.0 * risk);
+   }
+   double risk = sl - entry;
+   if(risk <= 0.0) return false;
+   return (ask <= entry - 2.0 * risk);
+}
+
+bool Layer2TpAlreadyHit(const bool forBuy)
+{
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong t = PositionGetTicket(i);
+      if(!PositionSelectByTicket(t)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+      string cmt = PositionGetString(POSITION_COMMENT);
+      if(StringFind(cmt, "L2") < 0) continue;
+      long ptype = PositionGetInteger(POSITION_TYPE);
+      if(forBuy && ptype != POSITION_TYPE_BUY) continue;
+      if(!forBuy && ptype != POSITION_TYPE_SELL) continue;
+      double tp = PositionGetDouble(POSITION_TP);
+      if(tp <= 0.0) continue;
+      if(forBuy && bid >= tp) return true;
+      if(!forBuy && ask <= tp) return true;
+   }
+
+   if(!HistorySelect(DayStartTime(), ServerNow() + 1)) return false;
+   int total = HistoryDealsTotal();
+   for(int i = 0; i < total; i++)
+   {
+      ulong ticket = HistoryDealGetTicket(i);
+      if(ticket == 0) continue;
+      if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol) continue;
+      if((ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) != InpMagicNumber) continue;
+      long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+      if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT && entry != DEAL_ENTRY_OUT_BY) continue;
+      if((ENUM_DEAL_REASON)HistoryDealGetInteger(ticket, DEAL_REASON) != DEAL_REASON_TP) continue;
+      string cmt = HistoryDealGetString(ticket, DEAL_COMMENT);
+      if(StringFind(cmt, "L2") < 0) continue;
+      long dtype = HistoryDealGetInteger(ticket, DEAL_TYPE);
+      if(forBuy && dtype != DEAL_TYPE_SELL) continue;
+      if(!forBuy && dtype != DEAL_TYPE_BUY) continue;
+      return true;
+   }
+   return false;
+}
+
+void ManagePendingOrders()
+{
+   int expireSec = InpPendingExpireMinutes * 60;
+   if(expireSec < 0) expireSec = 0;
+   datetime now = ServerNow();
+   bool buyL2Hit = Layer2TpAlreadyHit(true);
+   bool sellL2Hit = Layer2TpAlreadyHit(false);
+
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = OrderGetTicket(i);
+      if(!OrderSelect(ticket)) continue;
+      if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
+      if((ulong)OrderGetInteger(ORDER_MAGIC) != InpMagicNumber) continue;
+
+      long type = OrderGetInteger(ORDER_TYPE);
+      bool isBuy = IsBuyPendingType(type);
+      bool isSell = IsSellPendingType(type);
+      if(!isBuy && !isSell) continue;
+
+      datetime setup = (datetime)OrderGetInteger(ORDER_TIME_SETUP);
+      double entry = OrderGetDouble(ORDER_PRICE_OPEN);
+      double sl = OrderGetDouble(ORDER_SL);
+
+      bool expired = (expireSec > 0 && setup > 0 && now >= setup + expireSec);
+      bool hitTp2 = PendingHitTp2(isBuy, entry, sl) || (isBuy ? buyL2Hit : sellL2Hit);
+      if(!expired && !hitTp2) continue;
+
+      string why = expired ? "tidak kejemput " + IntegerToString(InpPendingExpireMinutes) + " menit"
+                           : "sudah terkena TP2";
+      if(trade.OrderDelete(ticket))
+         Print("Pending dibatalkan (", why, "): ticket ", ticket, " ", EnumToString((ENUM_ORDER_TYPE)type));
+      else
+         Print("Gagal batal pending ticket ", ticket, ". Error: ", GetLastError());
+   }
+}
+
 bool IsTradingBlocked(string &reason, const int extraPositions = 0)
 {
    EnsureDayState();
@@ -1554,8 +1653,9 @@ void CreateDashboard() {
    CreateButton("CloseOrd", 20, UI_Y + 520, PANEL_W-40, 30, "Close All Orders [O]", clrMaroon, clrWhite);
    CreateButton("BuyNow", 20, UI_Y + 560, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
    CreateButton("SellNow", 270, UI_Y + 560, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
-   CreateButton("GetNews", 20, UI_Y + 600, 200, 30, "Get News [N]", clrGray, clrBlack);
+   CreateButton("BtnAutoLmt", 20, UI_Y + 600, 200, 30, "Auto: OFF [N]", clrGray, clrBlack);
    CreateButton("Reset", 270, UI_Y + 600, 200, 30, "Reset [R]", clrGray, clrBlack);
+   ApplyAutoLimitUI();
    ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_ZORDER, 10);
 
    // Tambahkan ini di setiap fungsi pembuatan tombol/label dashboard Anda
@@ -1567,8 +1667,8 @@ void CreateDashboard() {
    ObjectSetInteger(0, "CloseOrd", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
    ObjectSetInteger(0, "BuyNow", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
    ObjectSetInteger(0, "SellNow", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
-   ObjectSetInteger(0, "GetNews", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
-   ObjectSetInteger(0, "Reset", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
+   ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, PREF+"Reset", OBJPROP_ZORDER, 10);
 
 
 }
@@ -1639,6 +1739,6 @@ int GetInitialY(string name) {
    if(name == PREF+"ClosePos") return UI_Y + 480;
    if(name == PREF+"CloseOrd") return UI_Y + 520;
    if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 560;
-   if(name == PREF+"Reset" || name == PREF+"GetNews") return UI_Y + 600;
+   if(name == PREF+"Reset" || name == PREF+"BtnAutoLmt") return UI_Y + 600;
    return UI_Y;
 }
