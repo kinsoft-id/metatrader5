@@ -1057,16 +1057,71 @@ bool PriceReachedTp(const ulong ticket)
 }
 
 //+------------------------------------------------------------------+
-bool TpDealSince(const datetime from)
+string SetupKeyFromComment(const string comment)
 {
+   int atMB = StringFind(comment, "MB");
+   int atMS = StringFind(comment, "MS");
+   int at = -1;
+   if(atMB >= 0 && (atMS < 0 || atMB < atMS))
+      at = atMB;
+   else if(atMS >= 0)
+      at = atMS;
+   if(at < 0)
+      return "";
+
+   string rest = StringSubstr(comment, at + 2);
+   if(StringFind(rest, "618") == 0)
+      rest = StringSubstr(rest, 3);
+   else if(StringFind(rest, "236") == 0)
+      rest = StringSubstr(rest, 3);
+   else if(StringLen(rest) > 0 && StringGetCharacter(rest, 0) == 'C')
+      rest = StringSubstr(rest, 1);
+   else
+      return "";
+
+   string digits = "";
+   int len = StringLen(rest);
+   for(int i = 0; i < len; i++)
+   {
+      ushort ch = StringGetCharacter(rest, i);
+      if(ch < '0' || ch > '9')
+         break;
+      digits += ShortToString(ch);
+   }
+   if(StringLen(digits) < 9)
+      return "";
+   return digits;
+}
+
+//+------------------------------------------------------------------+
+void AddSetupKey(string &keys[], const string key)
+{
+   if(key == "")
+      return;
+   int n = ArraySize(keys);
+   for(int i = 0; i < n; i++)
+   {
+      if(keys[i] == key)
+         return;
+   }
+   ArrayResize(keys, n + 1);
+   keys[n] = key;
+}
+
+//+------------------------------------------------------------------+
+int CollectTpSetupKeys(const datetime from, string &keys[])
+{
+   ArrayResize(keys, 0);
    datetime now = TimeCurrent();
    if(from <= 0 || now < from)
-      return false;
+      return 0;
    if(!HistorySelect(from, now + 60))
-      return false;
+      return 0;
 
+   ulong posIds[];
+   int posCount = 0;
    int total = HistoryDealsTotal();
-   for(int i = total - 1; i >= 0; i--)
+   for(int i = 0; i < total; i++)
    {
       ulong ticket = HistoryDealGetTicket(i);
       if(ticket == 0)
@@ -1079,20 +1134,71 @@ bool TpDealSince(const datetime from)
       long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
       if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY && entry != DEAL_ENTRY_INOUT)
          continue;
-      if((ENUM_DEAL_REASON)HistoryDealGetInteger(ticket, DEAL_REASON) == DEAL_REASON_TP)
-         return true;
+      if((ENUM_DEAL_REASON)HistoryDealGetInteger(ticket, DEAL_REASON) != DEAL_REASON_TP)
+         continue;
+
+      ulong posId = (ulong)HistoryDealGetInteger(ticket, DEAL_POSITION_ID);
+      bool seen = false;
+      for(int p = 0; p < posCount; p++)
+      {
+         if(posIds[p] == posId)
+         {
+            seen = true;
+            break;
+         }
+      }
+      if(seen)
+         continue;
+
+      ArrayResize(posIds, posCount + 1);
+      posIds[posCount] = posId;
+      posCount++;
+      AddSetupKey(keys, SetupKeyFromComment(HistoryDealGetString(ticket, DEAL_COMMENT)));
    }
-   return false;
+
+   if(posCount == 0)
+      return 0;
+   if(ArraySize(keys) >= posCount)
+      return ArraySize(keys);
+
+   if(!HistorySelect(now - 90 * 86400, now + 60))
+      return ArraySize(keys);
+
+   total = HistoryDealsTotal();
+   for(int p = 0; p < posCount; p++)
+   {
+      for(int i = 0; i < total; i++)
+      {
+         ulong ticket = HistoryDealGetTicket(i);
+         if(ticket == 0)
+            continue;
+         if((ulong)HistoryDealGetInteger(ticket, DEAL_POSITION_ID) != posIds[p])
+            continue;
+
+         long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+         if(entry != DEAL_ENTRY_IN && entry != DEAL_ENTRY_INOUT)
+            continue;
+
+         AddSetupKey(keys, SetupKeyFromComment(HistoryDealGetString(ticket, DEAL_COMMENT)));
+         break;
+      }
+   }
+   return ArraySize(keys);
 }
 
 //+------------------------------------------------------------------+
-void DeleteOurLimits(const string why)
+void DeleteLimitsForSetup(const string key, const string why)
 {
+   if(key == "")
+      return;
+
    int deleted = 0;
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
       ulong ticket = OrderGetTicket(i);
       if(!IsOurLimit(ticket))
+         continue;
+      if(SetupKeyFromComment(OrderGetString(ORDER_COMMENT)) != key)
          continue;
       if(trade.OrderDelete(ticket))
          deleted++;
@@ -1100,7 +1206,8 @@ void DeleteOurLimits(const string why)
          Print("Batal limit gagal #", ticket, " ", trade.ResultRetcodeDescription());
    }
    if(deleted > 0)
-      Print("Limit dibatalkan (", why, "): ", deleted);
+      Print("Limit candle ", TimeToString((datetime)StringToInteger(key)),
+            " dibatalkan (", why, "): ", deleted);
 }
 
 //+------------------------------------------------------------------+
@@ -1123,13 +1230,11 @@ void ManagePendingLimits()
    if(lastTpCheck <= 0)
       lastTpCheck = now - 60;
 
-   if(TpDealSince(lastTpCheck))
-   {
-      lastTpCheck = now;
-      DeleteOurLimits("TP posisi kena");
-      return;
-   }
+   string tpKeys[];
+   int tpCount = CollectTpSetupKeys(lastTpCheck, tpKeys);
    lastTpCheck = now;
+   for(int k = 0; k < tpCount; k++)
+      DeleteLimitsForSetup(tpKeys[k], "TP posisi candle ini kena");
 
    int expireSec = InpLimitExpireMinutes * 60;
    for(int i = OrdersTotal() - 1; i >= 0; i--)
@@ -1140,7 +1245,7 @@ void ManagePendingLimits()
 
       string why = "";
       if(PriceReachedTp(ticket))
-         why = "harga sudah TP";
+         why = "harga sudah TP order ini";
       else if(expireSec > 0)
       {
          datetime placed = (datetime)OrderGetInteger(ORDER_TIME_SETUP);
@@ -1933,7 +2038,7 @@ void CreateQuotes()
 {
    int qy = UI_Y + PANEL_H + 12;
    DrawNativeLabel(PREF + "Check1", "1. Close momentum = market searah candle. Limit 23.6 dan 61.8.", 20, qy, clrBlack);
-   DrawNativeLabel(PREF + "Check2", "2. SL 74.5, TP -27. Limit batal setelah 1 jam atau saat harga/posisi sudah TP.", 20, qy + 18, clrBlack);
+   DrawNativeLabel(PREF + "Check2", "2. SL 74.5, TP -27. Limit batal 1 jam, atau saat TP posisi candle itu sendiri kena.", 20, qy + 18, clrBlack);
    DrawNativeLabel(PREF + "Check3", "3. Bullish: 0 di high. Bearish: 0 di low. 74.5 di belakang limit.", 20, qy + 36, clrBlack);
    DrawNativeLabel(PREF + "Check4", "4. [F] scan  [C] pilih  [M] auto/manual  [B] setup  [E] entry close", 20, qy + 54, clrBlack);
    DrawNativeLabel(PREF + "Check5", "5. [2] limit 23.6  [6] limit 61.8  [Q]/[W] hapus  [P]/[O] close  [R] reset", 20, qy + 72, clrBlack);
