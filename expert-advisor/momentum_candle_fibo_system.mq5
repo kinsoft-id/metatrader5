@@ -2,18 +2,18 @@
 //|                                 momentum_candle_fibo_system.mq5 |
 //|                                                                  |
 //|  Sinyal = momentum candle (aturan sama dengan momentumcandle).   |
-//|  Saat candle itu close:                                          |
-//|    market searah candle                                          |
-//|    limit di fibo 23.6 dan 61.8                                   |
+//|  Saat candle itu close (auto) atau Setup (manual):               |
+//|    limit di fibo 23.6 dan 50                                     |
 //|    semua kaki SL 74.5, TP -27                                    |
+//|    tanpa market buy/sell saat close candle                       |
 //|                                                                  |
 //|  0% ada di ujung momentum (bullish = high, bearish = low)        |
-//|  supaya 23.6 / 61.8 adalah retrace, 74.5 di belakang entry,      |
+//|  supaya 23.6 / 50 adalah retrace, 74.5 di belakang entry,        |
 //|  dan -27 adalah ekstensi profit.                                 |
 //+------------------------------------------------------------------+
 #property strict
 #property version   "1.00"
-#property description "Momentum candle: entry di close, limit 23.6 & 61.8, SL 74.5, TP -27."
+#property description "Momentum candle: limit 23.6 & 50, SL 74.5, TP -27. Tanpa market close."
 
 #include <Trade\Trade.mqh>
 
@@ -27,7 +27,7 @@ enum ENUM_MOM_SHOW
 enum ENUM_EXEC_MODE
 {
    EXEC_MANUAL = 0, // Manual
-   EXEC_AUTO   = 1  // Auto (market + limit saat close)
+   EXEC_AUTO   = 1  // Auto (limit 23.6 & 50 saat close)
 };
 
 enum ENUM_LOT_MODE
@@ -50,7 +50,7 @@ input int           InpScanBars    = 300;           // Kedalaman scan momentum c
 
 input group "--- FIBO ---"
 input double InpLimit1       = 23.6;  // Limit 1
-input double InpLimit2       = 61.8;  // Limit 2
+input double InpLimit2       = 50.0;  // Limit 2
 input double InpSlLevel      = 74.5;  // SL semua kaki
 input double InpTpLevel      = -27.0; // TP semua kaki
 input color  InpFiboColor    = clrDodgerBlue;
@@ -59,7 +59,7 @@ input bool   InpFiboRayRight = true;  // Ray ke kanan
 
 input group "--- RISK ---"
 input ENUM_LOT_MODE InpLotMode            = LOT_AUTO_RISK; // Mode lot
-input double        InpRiskPercent        = 0.1;           // Risk % (max 1%, dibagi 3 kaki)
+input double        InpRiskPercent        = 0.1;           // Risk % (max 1%, dibagi 2 kaki)
 input bool          InpHardDailyStop      = true;          // Hard Daily Stop (close semua + disable)
 input double        InpMaxDailyLossPercent = 2.0;          // Hard stop jika Daily PnL+floating <= -%
 input int           InpMaxTradesPerDay    = 16;            // Max trades per hari (dari history)
@@ -154,7 +154,7 @@ int OnInit()
 
    Print("Momentum Candle Fibo siap. ",
          (g_auto ? "AUTO" : "MANUAL"),
-         " | entry close + limit ", DoubleToString(InpLimit1, 1),
+         " | limit ", DoubleToString(InpLimit1, 1),
          " & ", DoubleToString(InpLimit2, 1),
          " | SL ", DoubleToString(InpSlLevel, 1),
          " TP ", DoubleToString(InpTpLevel, 1));
@@ -243,9 +243,8 @@ void HandleHotkey(const long key)
    else if(key == 67) ActionPickCandle();      // C
    else if(key == 77) ActionToggleAuto();      // M
    else if(key == 66) ActionSetup();           // B
-   else if(key == 69) ActionEntry();           // E
    else if(key == 50) ActionLimit(InpLimit1, "236"); // 2
-   else if(key == 54) ActionLimit(InpLimit2, "618"); // 6
+   else if(key == 53) ActionLimit(InpLimit2, "50");  // 5
    else if(key == 81) ActionDelBuy();          // Q
    else if(key == 87) ActionDelSell();         // W
    else if(key == 80) ActionClosePositions();  // P
@@ -319,20 +318,15 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
          ActionSetup();
          ObjectSetInteger(0, PREF + "BtnSetup", OBJPROP_STATE, false);
       }
-      else if(sparam == PREF + "BtnEntry")
-      {
-         ActionEntry();
-         ObjectSetInteger(0, PREF + "BtnEntry", OBJPROP_STATE, false);
-      }
       else if(sparam == PREF + "BtnLim236")
       {
          ActionLimit(InpLimit1, "236");
          ObjectSetInteger(0, PREF + "BtnLim236", OBJPROP_STATE, false);
       }
-      else if(sparam == PREF + "BtnLim618")
+      else if(sparam == PREF + "BtnLim50")
       {
-         ActionLimit(InpLimit2, "618");
-         ObjectSetInteger(0, PREF + "BtnLim618", OBJPROP_STATE, false);
+         ActionLimit(InpLimit2, "50");
+         ObjectSetInteger(0, PREF + "BtnLim50", OBJPROP_STATE, false);
       }
       else if(sparam == PREF + "DelBuy")
       {
@@ -390,7 +384,8 @@ void ActionToggleAuto()
    g_auto = !g_auto;
    ApplyExecModeUI();
    if(g_auto)
-      Print("Auto ON. Market + limit dipasang saat momentum candle berikutnya close.");
+      Print("Auto ON. Limit ", DoubleToString(InpLimit1, 1), " dan ",
+            DoubleToString(InpLimit2, 1), " dipasang saat momentum candle berikutnya close.");
    else
       Print("Manual. Scan [F] atau pilih candle [C], lalu Setup [B].");
    ChartRedraw();
@@ -401,13 +396,6 @@ void ActionSetup()
 {
    SetPickMode(false);
    PlaceSetup();
-}
-
-//+------------------------------------------------------------------+
-void ActionEntry()
-{
-   SetPickMode(false);
-   PlaceOneLeg("C", true, 0.0);
 }
 
 //+------------------------------------------------------------------+
@@ -978,12 +966,12 @@ void PlaceSetup()
    }
    if(g_handledCandle == g_fiboTime)
    {
-      Print("Setup candle ini sudah dikirim. Kaki yang gagal bisa diulang dengan [E], [2], [6]. Reset [R] untuk paksa ulang.");
+      Print("Setup candle ini sudah dikirim. Kaki yang gagal bisa diulang dengan [2] atau [5]. Reset [R] untuk paksa ulang.");
       return;
    }
 
    string block = "";
-   if(IsTradingBlocked(block, 3 * Layers()))
+   if(IsTradingBlocked(block, 2 * Layers()))
    {
       Print("Setup: ", block);
       return;
@@ -991,18 +979,17 @@ void PlaceSetup()
 
    g_handledCandle = g_fiboTime;
    int sent = 0;
-   if(SendLeg("C", true, MarketEntry(g_fiboBullish)))
-      sent++;
    if(SendLeg("236", false, FiboPrice(InpLimit1)))
       sent++;
-   if(SendLeg("618", false, FiboPrice(InpLimit2)))
+   if(SendLeg("50", false, FiboPrice(InpLimit2)))
       sent++;
 
    Print("Setup ", (g_fiboBullish ? "BUY" : "SELL"),
          " ", TimeToString(g_fiboTime),
-         " terkirim ", sent, "/3.");
-   if(sent < 3)
-      Print("Kaki yang belum masuk: [E] entry close, [2] limit 23.6, [6] limit 61.8.");
+         " terkirim ", sent, "/2.");
+   if(sent < 2)
+      Print("Kaki yang belum masuk: [2] limit ", DoubleToString(InpLimit1, 1),
+            ", [5] limit ", DoubleToString(InpLimit2, 1), ".");
    RefreshRiskDisplay();
 }
 
@@ -1074,6 +1061,8 @@ string SetupKeyFromComment(const string comment)
       rest = StringSubstr(rest, 3);
    else if(StringFind(rest, "236") == 0)
       rest = StringSubstr(rest, 3);
+   else if(StringFind(rest, "50") == 0)
+      rest = StringSubstr(rest, 2);
    else if(StringLen(rest) > 0 && StringGetCharacter(rest, 0) == 'C')
       rest = StringSubstr(rest, 1);
    else
@@ -1386,7 +1375,7 @@ double CalcLotPerLayer(const ENUM_ORDER_TYPE orderType, const double entry, cons
 //+------------------------------------------------------------------+
 double LotFor(const bool isBuy, const double entry, const double sl, const bool verbose)
 {
-   int slots = 3 * Layers();
+   int slots = 2 * Layers();
    if(!IsAutoLot)
    {
       double lot = GetInputValue("InpLot");
@@ -1436,24 +1425,19 @@ int ValidLegCount(double &riskUSD)
    bool isBuy = g_fiboBullish;
    double sl = NormalizeDouble(FiboPrice(InpSlLevel), _Digits);
    double tp = NormalizeDouble(FiboPrice(InpTpLevel), _Digits);
-   double entries[3];
-   bool markets[3];
-   entries[0] = NormalizeDouble(MarketEntry(isBuy), _Digits);
-   entries[1] = NormalizeDouble(FiboPrice(InpLimit1), _Digits);
-   entries[2] = NormalizeDouble(FiboPrice(InpLimit2), _Digits);
-   markets[0] = true;
-   markets[1] = false;
-   markets[2] = false;
+   double entries[2];
+   entries[0] = NormalizeDouble(FiboPrice(InpLimit1), _Digits);
+   entries[1] = NormalizeDouble(FiboPrice(InpLimit2), _Digits);
 
    int copies = Layers();
    int n = 0;
    ENUM_ORDER_TYPE type = isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-   for(int i = 0; i < 3; i++)
+   for(int i = 0; i < 2; i++)
    {
       string why = "";
       if(!GeometryOk(isBuy, entries[i], sl, tp, why))
          continue;
-      if(!markets[i] && !PendingSideOk(isBuy, entries[i], why))
+      if(!PendingSideOk(isBuy, entries[i], why))
          continue;
       double lot = LotFor(isBuy, entries[i], sl, false);
       riskUSD += CalcRiskUSD(type, entries[i], sl, lot, copies);
@@ -1485,7 +1469,7 @@ void RefreshRiskDisplay()
    {
       status = (g_fiboBullish ? "BUY " : "SELL ")
              + TimeToString(g_fiboTime, TIME_DATE | TIME_MINUTES)
-             + " | kaki " + IntegerToString(legs) + "/3"
+             + " | kaki " + IntegerToString(legs) + "/2"
              + " | risk $ " + DoubleToString(riskUSD, 2);
       clr = g_fiboBullish ? clrDodgerBlue : clrOrangeRed;
    }
@@ -1997,8 +1981,8 @@ int GetInitialY(const string name)
    if(name == PREF + "Buy_Risk" || name == PREF + "Sell_Risk") return UI_Y + 54;
    if(name == PREF + "BtnMode") return UI_Y + 94;
    if(name == PREF + "BtnScanFibo" || name == PREF + "BtnPickCandle") return UI_Y + 134;
-   if(name == PREF + "BtnSetup" || name == PREF + "BtnEntry") return UI_Y + 174;
-   if(name == PREF + "BtnLim236" || name == PREF + "BtnLim618") return UI_Y + 214;
+   if(name == PREF + "BtnSetup") return UI_Y + 174;
+   if(name == PREF + "BtnLim236" || name == PREF + "BtnLim50") return UI_Y + 214;
    if(name == PREF + "DelBuy" || name == PREF + "DelSell") return UI_Y + 254;
    if(name == PREF + "ClosePos" || name == PREF + "CloseOrd") return UI_Y + 294;
    if(name == PREF + "Reset") return UI_Y + 334;
@@ -2037,11 +2021,11 @@ void ApplyQuoteVisibility()
 void CreateQuotes()
 {
    int qy = UI_Y + PANEL_H + 12;
-   DrawNativeLabel(PREF + "Check1", "1. Close momentum = market searah candle. Limit 23.6 dan 61.8.", 20, qy, clrBlack);
+   DrawNativeLabel(PREF + "Check1", "1. Close momentum = dua limit: 23.6 dan 50. Tanpa market close.", 20, qy, clrBlack);
    DrawNativeLabel(PREF + "Check2", "2. SL 74.5, TP -27. Limit batal 1 jam, atau saat TP posisi candle itu sendiri kena.", 20, qy + 18, clrBlack);
    DrawNativeLabel(PREF + "Check3", "3. Bullish: 0 di high. Bearish: 0 di low. 74.5 di belakang limit.", 20, qy + 36, clrBlack);
-   DrawNativeLabel(PREF + "Check4", "4. [F] scan  [C] pilih  [M] auto/manual  [B] setup  [E] entry close", 20, qy + 54, clrBlack);
-   DrawNativeLabel(PREF + "Check5", "5. [2] limit 23.6  [6] limit 61.8  [Q]/[W] hapus  [P]/[O] close  [R] reset", 20, qy + 72, clrBlack);
+   DrawNativeLabel(PREF + "Check4", "4. [F] scan  [C] pilih  [M] auto/manual  [B] dua limit", 20, qy + 54, clrBlack);
+   DrawNativeLabel(PREF + "Check5", "5. [2] limit 23.6  [5] limit 50  [Q]/[W] hapus  [P]/[O] close  [R] reset", 20, qy + 72, clrBlack);
 }
 
 //+------------------------------------------------------------------+
@@ -2078,10 +2062,9 @@ void CreateDashboard()
    CreateButton("BtnMode", 20, UI_Y + 94, 520, 30, "Manual  [M]", clrDimGray, clrWhite);
    CreateButton("BtnScanFibo", 20, UI_Y + 134, 250, 30, "Scan Fibo Candle [F]", clrTeal, clrWhite);
    CreateButton("BtnPickCandle", 290, UI_Y + 134, 250, 30, "Pilih Candle [C]", clrDarkOrange, clrWhite);
-   CreateButton("BtnSetup", 20, UI_Y + 174, 250, 30, "Setup + Limit [B]", clrDodgerBlue, clrWhite);
-   CreateButton("BtnEntry", 290, UI_Y + 174, 250, 30, "Entry Close [E]", clrSteelBlue, clrWhite);
+   CreateButton("BtnSetup", 20, UI_Y + 174, 520, 30, "Setup Limit 23.6 + 50 [B]", clrDodgerBlue, clrWhite);
    CreateButton("BtnLim236", 20, UI_Y + 214, 250, 30, "Limit " + DoubleToString(InpLimit1, 1) + " [2]", clrDodgerBlue, clrWhite);
-   CreateButton("BtnLim618", 290, UI_Y + 214, 250, 30, "Limit " + DoubleToString(InpLimit2, 1) + " [6]", clrOrangeRed, clrWhite);
+   CreateButton("BtnLim50", 290, UI_Y + 214, 250, 30, "Limit " + DoubleToString(InpLimit2, 1) + " [5]", clrOrangeRed, clrWhite);
    CreateButton("DelBuy", 20, UI_Y + 254, 250, 30, "Del Buy [Q]", clrBlue, clrWhite);
    CreateButton("DelSell", 290, UI_Y + 254, 250, 30, "Del Sell [W]", clrBrown, clrWhite);
    CreateButton("ClosePos", 20, UI_Y + 294, 250, 30, "Close Positions [P]", clrDarkRed, clrWhite);
