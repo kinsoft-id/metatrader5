@@ -12,7 +12,7 @@
 //|  dan -27 adalah ekstensi profit.                                 |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.00"
+#property version   "1.10"
 #property description "Momentum candle: limit 23.6 & 50, SL 74.5, TP -27. Tanpa market close."
 
 #include <Trade\Trade.mqh>
@@ -49,8 +49,8 @@ input double        InpMinAtrMult  = 0.6;           // Minimal range = ATR x mul
 input int           InpScanBars    = 300;           // Kedalaman scan momentum candle
 
 input group "--- FIBO ---"
-input double InpLimit1       = 23.6;  // Limit 1
-input double InpLimit2       = 50.0;  // Limit 2
+input double InpFiboLimit236 = 23.6;  // Limit 23.6
+input double InpFiboLimit50  = 50.0;  // Limit 50
 input double InpSlLevel      = 74.5;  // SL semua kaki
 input double InpTpLevel      = -27.0; // TP semua kaki
 input color  InpFiboColor    = clrDodgerBlue;
@@ -154,8 +154,8 @@ int OnInit()
 
    Print("Momentum Candle Fibo siap. ",
          (g_auto ? "AUTO" : "MANUAL"),
-         " | limit ", DoubleToString(InpLimit1, 1),
-         " & ", DoubleToString(InpLimit2, 1),
+         " | limit ", DoubleToString(InpFiboLimit236, 1),
+         " & ", DoubleToString(InpFiboLimit50, 1),
          " | SL ", DoubleToString(InpSlLevel, 1),
          " TP ", DoubleToString(InpTpLevel, 1));
    return(INIT_SUCCEEDED);
@@ -243,8 +243,8 @@ void HandleHotkey(const long key)
    else if(key == 67) ActionPickCandle();      // C
    else if(key == 77) ActionToggleAuto();      // M
    else if(key == 66) ActionSetup();           // B
-   else if(key == 50) ActionLimit(InpLimit1, "236"); // 2
-   else if(key == 53) ActionLimit(InpLimit2, "50");  // 5
+   else if(key == 50) ActionLimit(InpFiboLimit236, "236"); // 2
+   else if(key == 53) ActionLimit(InpFiboLimit50, "50");  // 5
    else if(key == 81) ActionDelBuy();          // Q
    else if(key == 87) ActionDelSell();         // W
    else if(key == 80) ActionClosePositions();  // P
@@ -320,12 +320,12 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       }
       else if(sparam == PREF + "BtnLim236")
       {
-         ActionLimit(InpLimit1, "236");
+         ActionLimit(InpFiboLimit236, "236");
          ObjectSetInteger(0, PREF + "BtnLim236", OBJPROP_STATE, false);
       }
       else if(sparam == PREF + "BtnLim50")
       {
-         ActionLimit(InpLimit2, "50");
+         ActionLimit(InpFiboLimit50, "50");
          ObjectSetInteger(0, PREF + "BtnLim50", OBJPROP_STATE, false);
       }
       else if(sparam == PREF + "DelBuy")
@@ -384,8 +384,8 @@ void ActionToggleAuto()
    g_auto = !g_auto;
    ApplyExecModeUI();
    if(g_auto)
-      Print("Auto ON. Limit ", DoubleToString(InpLimit1, 1), " dan ",
-            DoubleToString(InpLimit2, 1), " dipasang saat momentum candle berikutnya close.");
+      Print("Auto ON. Limit ", DoubleToString(InpFiboLimit236, 1), " dan ",
+            DoubleToString(InpFiboLimit50, 1), " dipasang saat momentum candle berikutnya close.");
    else
       Print("Manual. Scan [F] atau pilih candle [C], lalu Setup [B].");
    ChartRedraw();
@@ -646,21 +646,26 @@ void ClearFibo()
 //+------------------------------------------------------------------+
 void SetupFiboLevels(const string fiboName)
 {
-   double vals[6];
-   string txt[6];
-   color  clr[6];
+   double vals[7];
+   string txt[7];
+   color  clr[7];
 
-   vals[0] = 0.0;                    txt[0] = "0";                              clr[0] = clrDimGray;
-   vals[1] = 1.0;                    txt[1] = "100";                            clr[1] = clrDimGray;
-   vals[2] = FiboRatio(InpLimit1);   txt[2] = DoubleToString(InpLimit1, 1);     clr[2] = InpFiboColor;
-   vals[3] = FiboRatio(InpLimit2);   txt[3] = DoubleToString(InpLimit2, 1);     clr[3] = InpFiboColor;
-   vals[4] = FiboRatio(InpSlLevel);  txt[4] = "SL " + DoubleToString(InpSlLevel, 1); clr[4] = clrOrangeRed;
-   vals[5] = FiboRatio(InpTpLevel);  txt[5] = "TP " + DoubleToString(InpTpLevel, 1); clr[5] = clrSeaGreen;
+   vals[0] = 0.0;                              txt[0] = "0";                                          clr[0] = clrDimGray;
+   vals[1] = 1.0;                              txt[1] = "100";                                        clr[1] = clrDimGray;
+   vals[2] = FiboRatio(InpFiboLimit236);       txt[2] = DoubleToString(InpFiboLimit236, 1);           clr[2] = InpFiboColor;
+   vals[3] = 0.50;                             txt[3] = "50.0";                                       clr[3] = InpFiboColor;
+   vals[4] = FiboRatio(InpFiboLimit50);        txt[4] = "L " + DoubleToString(InpFiboLimit50, 1);     clr[4] = InpFiboColor;
+   vals[5] = FiboRatio(InpSlLevel);            txt[5] = "SL " + DoubleToString(InpSlLevel, 1);        clr[5] = clrOrangeRed;
+   vals[6] = FiboRatio(InpTpLevel);            txt[6] = "TP " + DoubleToString(InpTpLevel, 1);        clr[6] = clrSeaGreen;
+
+   if(MathAbs(FiboRatio(InpFiboLimit50) - 0.50) < 0.0001)
+      txt[4] = " ";
 
    ObjectSetInteger(0, fiboName, OBJPROP_COLOR, clrNONE);
    ObjectSetInteger(0, fiboName, OBJPROP_STYLE, STYLE_SOLID);
    ObjectSetInteger(0, fiboName, OBJPROP_WIDTH, 0);
-   ObjectSetInteger(0, fiboName, OBJPROP_LEVELS, 6);
+   ObjectSetInteger(0, fiboName, OBJPROP_LEVELS, 0);
+   ObjectSetInteger(0, fiboName, OBJPROP_LEVELS, 7);
    ObjectSetInteger(0, fiboName, OBJPROP_RAY_LEFT, false);
    ObjectSetInteger(0, fiboName, OBJPROP_RAY_RIGHT, InpFiboRayRight);
    ObjectSetInteger(0, fiboName, OBJPROP_SELECTABLE, false);
@@ -668,7 +673,7 @@ void SetupFiboLevels(const string fiboName)
    ObjectSetInteger(0, fiboName, OBJPROP_BACK, false);
    ObjectSetInteger(0, fiboName, OBJPROP_ZORDER, 0);
 
-   for(int i = 0; i < 6; i++)
+   for(int i = 0; i < 7; i++)
    {
       ObjectSetDouble(0, fiboName, OBJPROP_LEVELVALUE, i, vals[i]);
       ObjectSetInteger(0, fiboName, OBJPROP_LEVELSTYLE, i, STYLE_DOT);
@@ -731,8 +736,8 @@ bool DrawFibo(const int shift, const bool bullish)
    Print("Fibo candle ", (bullish ? "BUY" : "SELL"),
          " ", TimeToString(t1),
          " close=", DoubleToString(iClose(_Symbol, _Period, shift), _Digits),
-         " L1=", DoubleToString(FiboPrice(InpLimit1), _Digits),
-         " L2=", DoubleToString(FiboPrice(InpLimit2), _Digits),
+         " L1=", DoubleToString(FiboPrice(InpFiboLimit236), _Digits),
+         " L2=", DoubleToString(FiboPrice(InpFiboLimit50), _Digits),
          " SL=", DoubleToString(FiboPrice(InpSlLevel), _Digits),
          " TP=", DoubleToString(FiboPrice(InpTpLevel), _Digits));
    ChartRedraw();
@@ -978,18 +983,23 @@ void PlaceSetup()
    }
 
    g_handledCandle = g_fiboTime;
+   double p236 = FiboPrice(InpFiboLimit236);
+   double p50  = FiboPrice(InpFiboLimit50);
+   Print("Setup harga: 23.6=", DoubleToString(p236, _Digits),
+         " 50=", DoubleToString(p50, _Digits),
+         " (bukan 61.8=", DoubleToString(FiboPrice(61.8), _Digits), ")");
    int sent = 0;
-   if(SendLeg("236", false, FiboPrice(InpLimit1)))
+   if(SendLeg("236", false, p236))
       sent++;
-   if(SendLeg("50", false, FiboPrice(InpLimit2)))
+   if(SendLeg("50", false, p50))
       sent++;
 
    Print("Setup ", (g_fiboBullish ? "BUY" : "SELL"),
          " ", TimeToString(g_fiboTime),
          " terkirim ", sent, "/2.");
    if(sent < 2)
-      Print("Kaki yang belum masuk: [2] limit ", DoubleToString(InpLimit1, 1),
-            ", [5] limit ", DoubleToString(InpLimit2, 1), ".");
+      Print("Kaki yang belum masuk: [2] limit ", DoubleToString(InpFiboLimit236, 1),
+            ", [5] limit ", DoubleToString(InpFiboLimit50, 1), ".");
    RefreshRiskDisplay();
 }
 
@@ -1426,8 +1436,8 @@ int ValidLegCount(double &riskUSD)
    double sl = NormalizeDouble(FiboPrice(InpSlLevel), _Digits);
    double tp = NormalizeDouble(FiboPrice(InpTpLevel), _Digits);
    double entries[2];
-   entries[0] = NormalizeDouble(FiboPrice(InpLimit1), _Digits);
-   entries[1] = NormalizeDouble(FiboPrice(InpLimit2), _Digits);
+   entries[0] = NormalizeDouble(FiboPrice(InpFiboLimit236), _Digits);
+   entries[1] = NormalizeDouble(FiboPrice(InpFiboLimit50), _Digits);
 
    int copies = Layers();
    int n = 0;
@@ -2063,8 +2073,8 @@ void CreateDashboard()
    CreateButton("BtnScanFibo", 20, UI_Y + 134, 250, 30, "Scan Fibo Candle [F]", clrTeal, clrWhite);
    CreateButton("BtnPickCandle", 290, UI_Y + 134, 250, 30, "Pilih Candle [C]", clrDarkOrange, clrWhite);
    CreateButton("BtnSetup", 20, UI_Y + 174, 520, 30, "Setup Limit 23.6 + 50 [B]", clrDodgerBlue, clrWhite);
-   CreateButton("BtnLim236", 20, UI_Y + 214, 250, 30, "Limit " + DoubleToString(InpLimit1, 1) + " [2]", clrDodgerBlue, clrWhite);
-   CreateButton("BtnLim50", 290, UI_Y + 214, 250, 30, "Limit " + DoubleToString(InpLimit2, 1) + " [5]", clrOrangeRed, clrWhite);
+   CreateButton("BtnLim236", 20, UI_Y + 214, 250, 30, "Limit " + DoubleToString(InpFiboLimit236, 1) + " [2]", clrDodgerBlue, clrWhite);
+   CreateButton("BtnLim50", 290, UI_Y + 214, 250, 30, "Limit " + DoubleToString(InpFiboLimit50, 1) + " [5]", clrOrangeRed, clrWhite);
    CreateButton("DelBuy", 20, UI_Y + 254, 250, 30, "Del Buy [Q]", clrBlue, clrWhite);
    CreateButton("DelSell", 290, UI_Y + 254, 250, 30, "Del Sell [W]", clrBrown, clrWhite);
    CreateButton("ClosePos", 20, UI_Y + 294, 250, 30, "Close Positions [P]", clrDarkRed, clrWhite);
