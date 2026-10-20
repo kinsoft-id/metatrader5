@@ -53,7 +53,7 @@ double g_lastRiskPct = 0.12;
 int UI_Y = 100;      
 int HEADER_Y = 50;   
 int PANEL_W = 500;   
-int PANEL_H = 790;   
+int PANEL_H = 740;   
 int UI_OFFSCREEN = -2000; 
 
 // --- Function Declarations ---
@@ -1697,9 +1697,9 @@ void CreateDashboard() {
    CreateButton("CloseOrd", 20, UI_Y + 520, PANEL_W-40, 30, "Close All Orders [O]", clrMaroon, clrWhite);
    CreateButton("BuyNow", 20, UI_Y + 560, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
    CreateButton("SellNow", 270, UI_Y + 560, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
-   CreateButton("BtnAutoLmt", 20, UI_Y + 600, 200, 30, "RBR/DBD: OFF [N]", clrGray, clrBlack);
-   CreateButton("BtnAutoRev", 270, UI_Y + 600, 200, 30, "DBR/RBD: OFF [M]", clrGray, clrBlack);
-   CreateButton("Reset", 20, UI_Y + 640, PANEL_W-40, 30, "Reset [R]", clrGray, clrBlack);
+   CreateButton("BtnAutoLmt", 20, UI_Y + 600, PANEL_W-40, 30, "RBR/DBD: OFF [N]", clrGray, clrBlack);
+   CreateButton("BtnAutoRev", 20, UI_Y + 640, PANEL_W-40, 30, "DBR/RBD: OFF [M]", clrGray, clrBlack);
+   CreateButton("Reset", 20, UI_Y + 680, PANEL_W-40, 30, "Reset [R]", clrGray, clrBlack);
    ApplyAutoLimitUI();
    ApplyAutoLimitRevUI();
    ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_ZORDER, 10);
@@ -1786,7 +1786,8 @@ int GetInitialY(string name) {
    if(name == PREF+"ClosePos") return UI_Y + 480;
    if(name == PREF+"CloseOrd") return UI_Y + 520;
    if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 560;
-   if(name == PREF+"BtnAutoLmt" || name == PREF+"BtnAutoRev") return UI_Y + 600;
-   if(name == PREF+"Reset") return UI_Y + 640;
+   if(name == PREF+"BtnAutoLmt") return UI_Y + 600;
+   if(name == PREF+"BtnAutoRev") return UI_Y + 640;
+   if(name == PREF+"Reset") return UI_Y + 680;
    return UI_Y;
 }
