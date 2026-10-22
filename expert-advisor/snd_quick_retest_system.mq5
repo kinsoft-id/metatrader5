@@ -32,6 +32,7 @@ input int           InpMaxOpenSimultaneous = 5;  // Max posisi/order terbuka ber
 input bool          InpHardDailyStop = true;     // Hard Daily Stop (close semua + disable)
 input double        InpMaxDailyLossPercent = 2.0; // Hard stop jika Daily PnL+floating <= -%
 input int           InpPendingExpireMinutes = 60; // Cancel pending jika tidak kejemput (menit)
+input int           InpTp2CooldownMinutes = 5;   // Jeda setelah kena TP2 sebelum limit baru
 input ulong InpMagicNumber = 1111; // Magic Number (Harus beda tiap chart)
 
 
@@ -47,6 +48,10 @@ bool IsAutoLimit = false;
 bool IsAutoLimitRev = false;
 datetime g_lastAutoZoneBar = 0;
 datetime g_lastAutoRevBar = 0;
+datetime g_lastTp2HitBuy = 0;
+datetime g_lastTp2HitSell = 0;
+ulong    g_notedL2PosBuy = 0;
+ulong    g_notedL2PosSell = 0;
 bool IsAutoLot = true;
 double g_lastManualLot = 0.01;
 double g_lastRiskPct = 0.12;
@@ -120,7 +125,10 @@ void   ManagePendingOrders();
 bool   IsBuyPendingType(const long type);
 bool   IsSellPendingType(const long type);
 bool   PendingHitTp2(const bool isBuy, const double entry, const double sl);
-bool   Layer2TpAlreadyHit(const bool forBuy);
+void   NoteTp2Hit(const bool isBuy, const datetime when);
+datetime LatestLayer2TpDealTime(const bool forBuy);
+void   RefreshTp2HitTimes();
+bool   IsTp2CooldownActive(const bool isBuy, string &reason);
 void   UpdateHardStopLabel();
 bool   IsTradingBlocked(string &reason, const int extraPositions = 0);
 void   ActionDrawLine();
@@ -329,6 +337,10 @@ void ActionReset()
    IsSDScanning = false;
    g_lastAutoZoneBar = 0;
    g_lastAutoRevBar = 0;
+   g_lastTp2HitBuy = 0;
+   g_lastTp2HitSell = 0;
+   g_notedL2PosBuy = 0;
+   g_notedL2PosSell = 0;
    ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "Scan S&D [A]");
    ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrDarkGreen);
    if(IsAutoLot && ObjectFind(0, PREF+"LblCalcLot") >= 0)
@@ -527,6 +539,15 @@ void TryAutoLimitFromZone(const string type, const double baseLow, const double 
       g_lastAutoRevBar = zoneBar;
    }
 
+   bool isBuy = (type == "RBR" || type == "DBR");
+   string waitReason = "";
+   RefreshTp2HitTimes();
+   if(IsTp2CooldownActive(isBuy, waitReason))
+   {
+      Print("Auto Limit skip ", type, ": ", waitReason);
+      return;
+   }
+
    if(ObjectFind(0, PREF+"Line_Floor") < 0 || ObjectFind(0, PREF+"Line_Ceiling") < 0)
       CreateDrawingLines();
 
@@ -534,7 +555,7 @@ void TryAutoLimitFromZone(const string type, const double baseLow, const double 
    ObjectSetDouble(0, PREF+"Line_Ceiling", OBJPROP_PRICE, baseHigh);
    CalculateAndDrawAll();
 
-   if(type == "RBR" || type == "DBR")
+   if(isBuy)
    {
       Print("Auto Limit: ", type, " terbentuk. Pasang Buy Order.");
       PlaceBuyOrder();
@@ -1196,29 +1217,21 @@ bool PendingHitTp2(const bool isBuy, const double entry, const double sl)
    return (ask <= entry - 2.0 * risk);
 }
 
-bool Layer2TpAlreadyHit(const bool forBuy)
+void NoteTp2Hit(const bool isBuy, const datetime when)
 {
-   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   if(when <= 0) return;
+   if(isBuy)
    {
-      ulong t = PositionGetTicket(i);
-      if(!PositionSelectByTicket(t)) continue;
-      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
-      string cmt = PositionGetString(POSITION_COMMENT);
-      if(StringFind(cmt, "L2") < 0) continue;
-      long ptype = PositionGetInteger(POSITION_TYPE);
-      if(forBuy && ptype != POSITION_TYPE_BUY) continue;
-      if(!forBuy && ptype != POSITION_TYPE_SELL) continue;
-      double tp = PositionGetDouble(POSITION_TP);
-      if(tp <= 0.0) continue;
-      if(forBuy && bid >= tp) return true;
-      if(!forBuy && ask <= tp) return true;
+      if(when > g_lastTp2HitBuy) g_lastTp2HitBuy = when;
    }
+   else if(when > g_lastTp2HitSell)
+      g_lastTp2HitSell = when;
+}
 
-   if(!HistorySelect(DayStartTime(), ServerNow() + 1)) return false;
+datetime LatestLayer2TpDealTime(const bool forBuy)
+{
+   datetime latest = 0;
+   if(!HistorySelect(DayStartTime(), ServerNow() + 1)) return 0;
    int total = HistoryDealsTotal();
    for(int i = 0; i < total; i++)
    {
@@ -1234,9 +1247,57 @@ bool Layer2TpAlreadyHit(const bool forBuy)
       long dtype = HistoryDealGetInteger(ticket, DEAL_TYPE);
       if(forBuy && dtype != DEAL_TYPE_SELL) continue;
       if(!forBuy && dtype != DEAL_TYPE_BUY) continue;
-      return true;
+      datetime t = (datetime)HistoryDealGetInteger(ticket, DEAL_TIME);
+      if(t > latest) latest = t;
    }
-   return false;
+   return latest;
+}
+
+void RefreshTp2HitTimes()
+{
+   datetime now = ServerNow();
+   NoteTp2Hit(true, LatestLayer2TpDealTime(true));
+   NoteTp2Hit(false, LatestLayer2TpDealTime(false));
+
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong t = PositionGetTicket(i);
+      if(!PositionSelectByTicket(t)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+      string cmt = PositionGetString(POSITION_COMMENT);
+      if(StringFind(cmt, "L2") < 0) continue;
+      long ptype = PositionGetInteger(POSITION_TYPE);
+      double tp = PositionGetDouble(POSITION_TP);
+      if(tp <= 0.0) continue;
+
+      bool isBuy = (ptype == POSITION_TYPE_BUY);
+      bool atTp = isBuy ? (bid >= tp) : (ask <= tp);
+      if(!atTp) continue;
+
+      ulong noted = isBuy ? g_notedL2PosBuy : g_notedL2PosSell;
+      if(t == noted) continue;
+      if(isBuy) g_notedL2PosBuy = t;
+      else g_notedL2PosSell = t;
+      NoteTp2Hit(isBuy, now);
+   }
+}
+
+bool IsTp2CooldownActive(const bool isBuy, string &reason)
+{
+   int sec = InpTp2CooldownMinutes * 60;
+   if(sec <= 0) return false;
+   datetime hit = isBuy ? g_lastTp2HitBuy : g_lastTp2HitSell;
+   if(hit <= 0) return false;
+   datetime until = hit + sec;
+   datetime now = ServerNow();
+   if(now >= until) return false;
+   int left = (int)(until - now);
+   reason = "jeda " + IntegerToString(InpTp2CooldownMinutes) + " menit setelah TP2 ("
+          + IntegerToString(left) + "s lagi)";
+   return true;
 }
 
 void ManagePendingOrders()
@@ -1244,8 +1305,7 @@ void ManagePendingOrders()
    int expireSec = InpPendingExpireMinutes * 60;
    if(expireSec < 0) expireSec = 0;
    datetime now = ServerNow();
-   bool buyL2Hit = Layer2TpAlreadyHit(true);
-   bool sellL2Hit = Layer2TpAlreadyHit(false);
+   RefreshTp2HitTimes();
 
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
@@ -1262,10 +1322,15 @@ void ManagePendingOrders()
       datetime setup = (datetime)OrderGetInteger(ORDER_TIME_SETUP);
       double entry = OrderGetDouble(ORDER_PRICE_OPEN);
       double sl = OrderGetDouble(ORDER_SL);
+      datetime tp2Hit = isBuy ? g_lastTp2HitBuy : g_lastTp2HitSell;
 
       bool expired = (expireSec > 0 && setup > 0 && now >= setup + expireSec);
-      bool hitTp2 = PendingHitTp2(isBuy, entry, sl) || (isBuy ? buyL2Hit : sellL2Hit);
-      if(!expired && !hitTp2) continue;
+      bool ownTp2 = PendingHitTp2(isBuy, entry, sl);
+      bool leftoverAfterTp2 = (tp2Hit > 0 && setup > 0 && setup <= tp2Hit);
+      if(!expired && !ownTp2 && !leftoverAfterTp2) continue;
+
+      if(ownTp2)
+         NoteTp2Hit(isBuy, now);
 
       string why = expired ? "tidak kejemput " + IntegerToString(InpPendingExpireMinutes) + " menit"
                            : "sudah terkena TP2";
@@ -1398,6 +1463,11 @@ void PlaceBuyOrder() {
       Print("Buy Order diblok: ", blockReason);
       return;
    }
+   RefreshTp2HitTimes();
+   if(IsTp2CooldownActive(true, blockReason)) {
+      Print("Buy Order diblok: ", blockReason);
+      return;
+   }
    CalculateAndDrawAll();
 
    double proximal = GetInputValue("Buy_Entry");
@@ -1463,6 +1533,11 @@ void PlaceSellOrder() {
    string blockReason = "";
    int layers = GetLayerCount();
    if(IsTradingBlocked(blockReason, layers)) {
+      Print("Sell Order diblok: ", blockReason);
+      return;
+   }
+   RefreshTp2HitTimes();
+   if(IsTp2CooldownActive(false, blockReason)) {
       Print("Sell Order diblok: ", blockReason);
       return;
    }
