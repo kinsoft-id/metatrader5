@@ -9,7 +9,7 @@
 
 //--- Input Parameters
 input double InpBasingRatio    = 0.50; // Rasio maksimal body candle untuk Base
-input double InpImpulsiveRatio = 0.55; // Rasio minimal body candle untuk Leg In/Out
+input double InpImpulsiveRatio = 0.62; // Rasio minimal body candle untuk Leg In/Out
 input int    InpMaxBase     = 6;    // Maksimal candle base berurutan
 input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally
 input bool   InpShowDBD     = true;  // Tampilkan Drop Base Drop
