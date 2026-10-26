@@ -1,17 +1,19 @@
 //+------------------------------------------------------------------+
-//|                                             SND_Trading_System.mq5|
+//|                                      Pivot_And_Control_System.mq5|
 //|                                  Copyright 2026, User            |
 //+------------------------------------------------------------------+
+#property copyright "Copyright 2026, User"
+#property description "Pivot and Control System"
 #property strict
 #include <Trade\Trade.mqh> 
 
 //--- Input Parameters
-input double InpBasingRatio = 0.618; // Rasio maksimal body candle untuk dianggap Base
-input int    InpMaxBase     = 13;    // Maksimal candle base berurutan
+input double InpBasingRatio = 0.50; // Rasio maksimal body candle untuk dianggap Base
+input int    InpMaxBase     = 6;    // Maksimal candle base berurutan
 input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally
 input bool   InpShowDBD     = true;  // Tampilkan Drop Base Drop
-input bool   InpShowDBR     = false;  // Tampilkan Drop Base Rally
-input bool   InpShowRBD     = false;  // Tampilkan Rally Base Drop
+input bool   InpShowDBR     = true;  // Tampilkan Drop Base Rally
+input bool   InpShowRBD     = true;  // Tampilkan Rally Base Drop
 input int InpMaxZones = 20; // Maksimal zona yang ditampilkan
 
 // Struktur untuk menyimpan data berita yang sudah disaring
@@ -62,6 +64,12 @@ void CreateEdit(string name, int x, int y, int w, int h, string val);
 void DelPO(ENUM_ORDER_TYPE type);
 void CloseAllPositions();
 void CloseAllOrders();
+bool ZoneIsDemand(const string name);
+bool ZoneIsSupply(const string name);
+bool GetZonePrices(const string rectName, double &zLow, double &zHigh);
+double FindOppositeCutPrice(const bool isBuy, const double fromPrice, const double tpLimit);
+double ClipTpToOppositeZone(const bool isBuy, const double entry, const double tp);
+void ManageOppositeZoneCutProfit();
 
 //+------------------------------------------------------------------+
 //| Initialization                                                   |
@@ -103,6 +111,7 @@ void OnTick() {
    datetime serverTime = TimeCurrent();
    string liveClock = TimeToString(serverTime, TIME_MINUTES | TIME_SECONDS);
    DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, 20, 25, clrBlack);
+   ManageOppositeZoneCutProfit();
 }
 
 // --- FUNGSI TIMER UNTUK MENYETEL WARNA MULTI EMA DARI EA ---
@@ -148,7 +157,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       else if(sparam == PREF+"BtnDraw") { CreateDrawingLines(); CalculateAndDrawAll(); ObjectSetInteger(0, PREF+"BtnDraw", OBJPROP_STATE, false); }
       else if(sparam == PREF+"BtnScanSD") { 
          IsSDScanning = !IsSDScanning;
-         if(IsSDScanning) { ScanSD(); ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "S&D: ON"); ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrGreen); } 
+         if(IsSDScanning) { ScanSD(); if(ObjectFind(0, PREF+"Line_Floor") >= 0 && ObjectFind(0, PREF+"Line_Ceiling") >= 0) CalculateAndDrawAll(); ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "S&D: ON"); ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrGreen); } 
          else { ObjectsDeleteAll(0, ZONE_PREF); ObjectSetString(0, PREF+"BtnScanSD", OBJPROP_TEXT, "Scan S&D"); ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_BGCOLOR, clrDarkGreen); }
          ObjectSetInteger(0, PREF+"BtnScanSD", OBJPROP_STATE, false); 
       }
@@ -502,13 +511,21 @@ void CalculateAndDrawAll() {
    UpdateLine(PREF+"Calc_B_SL", bSL, clrBlue);
    UpdateLine(PREF+"Calc_S_SL", sSL, clrRed); 
 
-   UpdateLine(PREF+"Calc_B_TP1", bEntry + bRisk, clrGreen); UpdateLine(PREF+"Calc_B_TP2", bEntry + (2 * bRisk), clrGreen); UpdateLine(PREF+"Calc_B_TP3", bEntry + (3 * bRisk), clrGreen);
-   UpdateLine(PREF+"Calc_S_TP1", sEntry - sRisk, clrGreen); UpdateLine(PREF+"Calc_S_TP2", sEntry - (2 * sRisk), clrGreen); UpdateLine(PREF+"Calc_S_TP3", sEntry - (3 * sRisk), clrGreen);
+   // TP normal = 1R/2R/3R. Jika ada S&D lawan sebelum TP, cut profit di zona itu.
+   double bTP1 = ClipTpToOppositeZone(true,  bEntry, bEntry + bRisk);
+   double bTP2 = ClipTpToOppositeZone(true,  bEntry, bEntry + (2 * bRisk));
+   double bTP3 = ClipTpToOppositeZone(true,  bEntry, bEntry + (3 * bRisk));
+   double sTP1 = ClipTpToOppositeZone(false, sEntry, sEntry - sRisk);
+   double sTP2 = ClipTpToOppositeZone(false, sEntry, sEntry - (2 * sRisk));
+   double sTP3 = ClipTpToOppositeZone(false, sEntry, sEntry - (3 * sRisk));
+
+   UpdateLine(PREF+"Calc_B_TP1", bTP1, clrGreen); UpdateLine(PREF+"Calc_B_TP2", bTP2, clrGreen); UpdateLine(PREF+"Calc_B_TP3", bTP3, clrGreen);
+   UpdateLine(PREF+"Calc_S_TP1", sTP1, clrGreen); UpdateLine(PREF+"Calc_S_TP2", sTP2, clrGreen); UpdateLine(PREF+"Calc_S_TP3", sTP3, clrGreen);
    
    UpdateInput("Buy_Floor", pFloor); UpdateInput("Buy_Entry", bEntry); UpdateInput("Buy_Stoploss", bSL); 
-   UpdateInput("Buy_TP1", bEntry+bRisk); UpdateInput("Buy_TP2", bEntry+(2*bRisk)); UpdateInput("Buy_TP3", bEntry+(3*bRisk));
+   UpdateInput("Buy_TP1", bTP1); UpdateInput("Buy_TP2", bTP2); UpdateInput("Buy_TP3", bTP3);
    UpdateInput("Sell_Ceiling", pCeiling); UpdateInput("Sell_Entry", sEntry); UpdateInput("Sell_Stoploss", sSL); 
-   UpdateInput("Sell_TP1", sEntry-sRisk); UpdateInput("Sell_TP2", sEntry-(2*sRisk)); UpdateInput("Sell_TP3", sEntry-(3*sRisk));
+   UpdateInput("Sell_TP1", sTP1); UpdateInput("Sell_TP2", sTP2); UpdateInput("Sell_TP3", sTP3);
 
    // Kalkulasi ukuran pips dinamis
    double pipSize = (_Digits == 3 || _Digits == 5) ? _Point * 10 : _Point;
@@ -536,7 +553,7 @@ void CreateDashboard() {
    CreateObject("HdrPanel", OBJ_RECTANGLE_LABEL, 0, 10, HEADER_Y, PANEL_W, 40, clrBlack);
    ObjectSetInteger(0, PREF+"HdrPanel", OBJPROP_BGCOLOR, clrDarkSlateGray);
    CreateButton("Hide", 15, HEADER_Y + 7, 50, 25, "Hide", clrGray, clrWhite);
-   CreateLabel("Title", (PANEL_W / 2) + 10 - 40, HEADER_Y + 2, "SND Trading System", clrWhite); 
+   CreateLabel("Title", (PANEL_W / 2) + 10 - 70, HEADER_Y + 2, "Pivot and Control System", clrWhite); 
    CreateObject("Panel", OBJ_RECTANGLE_LABEL, 0, 10, UI_Y, PANEL_W, PANEL_H, clrDarkSlateGray);
    
    CreateLabel("LblLayers", 20, UI_Y+12, "Layers:", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "1");
@@ -598,6 +615,114 @@ void CreateEdit(string name, int x, int y, int w, int h, string val) { CreateObj
 void DelPO(ENUM_ORDER_TYPE type) { for(int i=OrdersTotal()-1; i>=0; i--) { ulong t=OrderGetTicket(i); if(OrderSelect(t) && OrderGetString(ORDER_SYMBOL)==_Symbol && OrderGetInteger(ORDER_TYPE)==type) trade.OrderDelete(t); } }
 void CloseAllPositions() { for(int i=PositionsTotal()-1; i>=0; i--) { ulong t=PositionGetTicket(i); if(PositionSelectByTicket(t) && PositionGetString(POSITION_SYMBOL)==_Symbol) trade.PositionClose(t); } }
 void CloseAllOrders() { for(int i=OrdersTotal()-1; i>=0; i--) { ulong t=OrderGetTicket(i); if(OrderSelect(t) && OrderGetString(ORDER_SYMBOL)==_Symbol) trade.OrderDelete(t); } }
+
+bool ZoneIsDemand(const string name)
+{
+   return (StringFind(name, "_RBR_") >= 0 || StringFind(name, "_DBR_") >= 0);
+}
+
+bool ZoneIsSupply(const string name)
+{
+   return (StringFind(name, "_DBD_") >= 0 || StringFind(name, "_RBD_") >= 0);
+}
+
+bool GetZonePrices(const string rectName, double &zLow, double &zHigh)
+{
+   double p1 = ObjectGetDouble(0, rectName, OBJPROP_PRICE, 0);
+   double p2 = ObjectGetDouble(0, rectName, OBJPROP_PRICE, 1);
+   zLow  = MathMin(p1, p2);
+   zHigh = MathMax(p1, p2);
+   return (zLow > 0.0 && zHigh > zLow);
+}
+
+// Zona lawan terdekat yang masih di depan fromPrice dan sebelum tpLimit.
+// Buy: supply proximal (base low). Sell: demand proximal (base high).
+double FindOppositeCutPrice(const bool isBuy, const double fromPrice, const double tpLimit)
+{
+   double cut = 0.0;
+   int total = ObjectsTotal(0, 0, OBJ_RECTANGLE);
+   for(int i = 0; i < total; i++)
+   {
+      string name = ObjectName(0, i, 0, OBJ_RECTANGLE);
+      if(StringFind(name, ZONE_PREF) != 0) continue;
+
+      double zLow = 0.0, zHigh = 0.0;
+      if(!GetZonePrices(name, zLow, zHigh)) continue;
+
+      if(isBuy)
+      {
+         if(!ZoneIsSupply(name)) continue;
+         double proximal = zLow;
+         if(proximal > fromPrice && proximal < tpLimit)
+         {
+            if(cut == 0.0 || proximal < cut) cut = proximal;
+         }
+      }
+      else
+      {
+         if(!ZoneIsDemand(name)) continue;
+         double proximal = zHigh;
+         if(proximal < fromPrice && proximal > tpLimit)
+         {
+            if(cut == 0.0 || proximal > cut) cut = proximal;
+         }
+      }
+   }
+   return cut;
+}
+
+double ClipTpToOppositeZone(const bool isBuy, const double entry, const double tp)
+{
+   if(!IsSDScanning) return tp;
+   double cut = FindOppositeCutPrice(isBuy, entry, tp);
+   if(cut <= 0.0) return tp;
+
+   double stops = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+   if(stops <= 0.0) stops = _Point;
+   if(MathAbs(cut - entry) < stops) return tp;
+
+   return NormalizeDouble(cut, _Digits);
+}
+
+void ManageOppositeZoneCutProfit()
+{
+   if(!IsSDScanning) return;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+
+      bool isBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      double sl    = PositionGetDouble(POSITION_SL);
+      double tp    = PositionGetDouble(POSITION_TP);
+      double bid   = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double ask   = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double mark  = isBuy ? bid : ask;
+      double tpLimit = tp;
+
+      if(tpLimit <= 0.0)
+         tpLimit = isBuy ? (mark + 100000 * _Point) : (mark - 100000 * _Point);
+
+      double cut = FindOppositeCutPrice(isBuy, mark, tpLimit);
+      if(cut <= 0.0) continue;
+
+      if((isBuy && bid >= cut) || (!isBuy && ask <= cut))
+      {
+         if(trade.PositionClose(ticket))
+            Print("Cut profit di S&D lawan @ ", DoubleToString(cut, _Digits), " ticket ", ticket);
+         continue;
+      }
+
+      if(tp <= 0.0 || (isBuy && cut < tp - _Point) || (!isBuy && cut > tp + _Point))
+      {
+         if(trade.PositionModify(ticket, sl, NormalizeDouble(cut, _Digits)))
+            Print("TP dipotong ke S&D lawan @ ", DoubleToString(cut, _Digits), " ticket ", ticket);
+      }
+   }
+}
 
 int GetInitialY(string name) {
    if(name == PREF+"HdrPanel") return HEADER_Y;

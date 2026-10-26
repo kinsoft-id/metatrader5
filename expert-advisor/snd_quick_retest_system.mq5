@@ -6,13 +6,13 @@
 #include <Trade\Trade.mqh> 
 
 //--- Input Parameters
-input double InpBasingRatio    = 0.618; // Rasio maksimal body candle untuk Base
+input double InpBasingRatio    = 0.50; // Rasio maksimal body candle untuk Base
 input double InpImpulsiveRatio = 0.55; // Rasio minimal body candle untuk Leg In/Out
-input int    InpMaxBase     = 5;    // Maksimal candle base berurutan
+input int    InpMaxBase     = 6;    // Maksimal candle base berurutan
 input bool   InpShowRBR     = true;  // Tampilkan Rally Base Rally
 input bool   InpShowDBD     = true;  // Tampilkan Drop Base Drop
-input bool   InpShowDBR     = false;  // Tampilkan Drop Base Rally
-input bool   InpShowRBD     = false;  // Tampilkan Rally Base Drop
+input bool   InpShowDBR     = true;  // Tampilkan Drop Base Rally
+input bool   InpShowRBD     = true;  // Tampilkan Rally Base Drop
 input int InpMaxZones = 10; // Maksimal zona yang ditampilkan
 
 enum ENUM_LOT_MODE
