@@ -76,6 +76,13 @@ void ActionSellNow();
 void ApplyScanSDUI();
 bool HotkeyModifiersFree();
 void HandleHotkey(const long key);
+bool ZoneIsDemand(const string name);
+bool ZoneIsSupply(const string name);
+bool GetZonePrices(const string rectName, double &zLow, double &zHigh);
+double FindOppositeCutPrice(const bool isBuy, const double fromPrice, const double tpLimit);
+double ClipTpToOppositeZone(const bool isBuy, const double entry, const double tp);
+void ManageOppositeZoneCutProfit();
+void RecalcTpIfDrawn();
 
 //+------------------------------------------------------------------+
 //| Initialization                                                   |
@@ -117,7 +124,8 @@ void OnTick() {
    DrawNativeLabel(PREF + "Live_Clock", "Server Time: " + liveClock, (PANEL_W + 20), 50, clrBlack);
    ApplyQuoteVisibility();
 
-   CheckCutLoss(); 
+   CheckCutLoss();
+   ManageOppositeZoneCutProfit();
 
    if(IsSDScanning)
    {
@@ -127,6 +135,7 @@ void OnTick() {
       {
          lastBarTime = curBarTime;
          ScanSD();
+         RecalcTpIfDrawn();
       }
    }
 }
@@ -201,6 +210,7 @@ void ActionScanSD()
    if(IsSDScanning) ScanSD();
    else ObjectsDeleteAll(0, ZONE_PREF);
    ApplyScanSDUI();
+   RecalcTpIfDrawn();
 }
 
 void ActionBuyLimit()        { PlaceBuyLimit(); }
@@ -579,7 +589,12 @@ void CheckCutLoss()
    static bool buyFloorTouched = false;
    if(closePrice <= bFloor && bFloor > 0) buyFloorTouched = true; 
    
-   if(buyFloorTouched && closePrice >= tp) {
+   double bTP = GetInputValue("Buy_TP");
+   double sTP = GetInputValue("Sell_TP");
+   if(bTP <= 0.0) bTP = tp;
+   if(sTP <= 0.0) sTP = tp;
+
+   if(buyFloorTouched && closePrice >= bTP) {
       ClosePositionsByType(POSITION_TYPE_BUY, InpMagicNumber);
       buyFloorTouched = false; // Reset flag setelah close
    }
@@ -593,7 +608,7 @@ void CheckCutLoss()
    static bool sellCeilingTouched = false;
    if(closePrice >= sCeiling && sCeiling > 0) sellCeilingTouched = true;
    
-   if(sellCeilingTouched && closePrice <= tp) {
+   if(sellCeilingTouched && closePrice <= sTP) {
       ClosePositionsByType(POSITION_TYPE_SELL, InpMagicNumber);
       sellCeilingTouched = false; // Reset flag setelah close
    }
@@ -641,21 +656,24 @@ void CalculateAndDrawAll()
    int layers = (int)GetInputValue("InpLayers");
    double range = MathAbs(pCeiling - pFloor);
    ObjectsDeleteAll(0, PREF+"Layer_"); ObjectsDeleteAll(0, PREF+"Calc_");
-   double tp = pFloor + 0.5 * range;
+   double tpMid = pFloor + 0.5 * range;
    double bEntry = pFloor + 0.24 * range; double bSL = pFloor - 0.08 * range; double bCL = pFloor - 0.16 * range; 
    double sEntry = pCeiling - 0.24 * range; double sSL = pCeiling + 0.08 * range; double sCL = pCeiling + 0.16 * range;
+   double bTP = ClipTpToOppositeZone(true,  bEntry, tpMid);
+   double sTP = ClipTpToOppositeZone(false, sEntry, tpMid);
    
    double stepB = (layers > 1) ? (bEntry - pFloor) / (layers - 1) : 0;
    for(int i=0; i<layers; i++) UpdateLine(PREF+"Layer_Buy_"+IntegerToString(i), bEntry - (stepB * i), clrBlue);
    double stepS = (layers > 1) ? (pCeiling - sEntry) / (layers - 1) : 0;
    for(int i=0; i<layers; i++) UpdateLine(PREF+"Layer_Sell_"+IntegerToString(i), sEntry + (stepS * i), clrRed);
    
-   UpdateLine(PREF+"Calc_TP", tp, clrDarkGreen);
+   UpdateLine(PREF+"Calc_B_TP", bTP, clrDarkGreen);
+   UpdateLine(PREF+"Calc_S_TP", sTP, clrLimeGreen);
    UpdateLine(PREF+"Calc_B_SL", bSL, clrBlue); UpdateLine(PREF+"Calc_B_CL", bCL, clrDarkBlue);
    UpdateLine(PREF+"Calc_S_SL", sSL, clrRed); UpdateLine(PREF+"Calc_S_CL", sCL, clrDarkRed);
    
-   UpdateInput("Buy_Floor", pFloor); UpdateInput("Buy_Entry", bEntry); UpdateInput("Buy_Stoploss", bSL); UpdateInput("Buy_CutLoss", bCL); UpdateInput("Buy_TP", tp);
-   UpdateInput("Sell_Ceiling", pCeiling); UpdateInput("Sell_Entry", sEntry); UpdateInput("Sell_Stoploss", sSL); UpdateInput("Sell_CutLoss", sCL); UpdateInput("Sell_TP", tp);
+   UpdateInput("Buy_Floor", pFloor); UpdateInput("Buy_Entry", bEntry); UpdateInput("Buy_Stoploss", bSL); UpdateInput("Buy_CutLoss", bCL); UpdateInput("Buy_TP", bTP);
+   UpdateInput("Sell_Ceiling", pCeiling); UpdateInput("Sell_Entry", sEntry); UpdateInput("Sell_Stoploss", sSL); UpdateInput("Sell_CutLoss", sCL); UpdateInput("Sell_TP", sTP);
    
    // Kalkulasi ukuran pips dinamis
    double pipSize = (_Digits == 3 || _Digits == 5) ? _Point * 10 : _Point;
@@ -816,6 +834,121 @@ void CloseAllOrders(ulong magic)
       if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
       if((ulong)OrderGetInteger(ORDER_MAGIC) != magic) continue;
       trade.OrderDelete(ticket);
+   }
+}
+
+void RecalcTpIfDrawn()
+{
+   if(ObjectFind(0, PREF+"Line_Floor") >= 0 && ObjectFind(0, PREF+"Line_Ceiling") >= 0)
+      CalculateAndDrawAll();
+}
+
+bool ZoneIsDemand(const string name)
+{
+   return (StringFind(name, "_RBR_") >= 0 || StringFind(name, "_DBR_") >= 0);
+}
+
+bool ZoneIsSupply(const string name)
+{
+   return (StringFind(name, "_DBD_") >= 0 || StringFind(name, "_RBD_") >= 0);
+}
+
+bool GetZonePrices(const string rectName, double &zLow, double &zHigh)
+{
+   double p1 = ObjectGetDouble(0, rectName, OBJPROP_PRICE, 0);
+   double p2 = ObjectGetDouble(0, rectName, OBJPROP_PRICE, 1);
+   zLow  = MathMin(p1, p2);
+   zHigh = MathMax(p1, p2);
+   return (zLow > 0.0 && zHigh > zLow);
+}
+
+// Buy: supply proximal (base low). Sell: demand proximal (base high).
+double FindOppositeCutPrice(const bool isBuy, const double fromPrice, const double tpLimit)
+{
+   double cut = 0.0;
+   int total = ObjectsTotal(0, 0, OBJ_RECTANGLE);
+   for(int i = 0; i < total; i++)
+   {
+      string name = ObjectName(0, i, 0, OBJ_RECTANGLE);
+      if(StringFind(name, ZONE_PREF) != 0) continue;
+
+      double zLow = 0.0, zHigh = 0.0;
+      if(!GetZonePrices(name, zLow, zHigh)) continue;
+
+      if(isBuy)
+      {
+         if(!ZoneIsSupply(name)) continue;
+         double proximal = zLow;
+         if(proximal > fromPrice && proximal < tpLimit)
+         {
+            if(cut == 0.0 || proximal < cut) cut = proximal;
+         }
+      }
+      else
+      {
+         if(!ZoneIsDemand(name)) continue;
+         double proximal = zHigh;
+         if(proximal < fromPrice && proximal > tpLimit)
+         {
+            if(cut == 0.0 || proximal > cut) cut = proximal;
+         }
+      }
+   }
+   return cut;
+}
+
+double ClipTpToOppositeZone(const bool isBuy, const double entry, const double tp)
+{
+   if(!IsSDScanning) return tp;
+   double cut = FindOppositeCutPrice(isBuy, entry, tp);
+   if(cut <= 0.0) return tp;
+
+   double stops = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+   if(stops <= 0.0) stops = _Point;
+   if(MathAbs(cut - entry) < stops) return tp;
+
+   return NormalizeDouble(cut, _Digits);
+}
+
+void ManageOppositeZoneCutProfit()
+{
+   if(!IsSDScanning) return;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+
+      bool isBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      double sl    = PositionGetDouble(POSITION_SL);
+      double tp    = PositionGetDouble(POSITION_TP);
+      double bid   = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double ask   = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double mark  = isBuy ? bid : ask;
+      double tpLimit = tp;
+
+      if(tpLimit <= 0.0)
+         tpLimit = isBuy ? GetInputValue("Buy_TP") : GetInputValue("Sell_TP");
+      if(tpLimit <= 0.0)
+         tpLimit = isBuy ? (mark + 100000 * _Point) : (mark - 100000 * _Point);
+
+      double cut = FindOppositeCutPrice(isBuy, mark, tpLimit);
+      if(cut <= 0.0) continue;
+
+      if((isBuy && bid >= cut) || (!isBuy && ask <= cut))
+      {
+         if(trade.PositionClose(ticket))
+            Print("Cut profit di S&D lawan @ ", DoubleToString(cut, _Digits), " ticket ", ticket);
+         continue;
+      }
+
+      if(tp <= 0.0 || (isBuy && cut < tp - _Point) || (!isBuy && cut > tp + _Point))
+      {
+         if(trade.PositionModify(ticket, sl, NormalizeDouble(cut, _Digits)))
+            Print("TP dipotong ke S&D lawan @ ", DoubleToString(cut, _Digits), " ticket ", ticket);
+      }
    }
 }
 
