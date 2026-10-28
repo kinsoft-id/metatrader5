@@ -1761,8 +1761,8 @@ void CreateDashboard() {
    CreateCalcLotLabel();
    ApplyLotModeUI();
    
-   CreateButton("BtnDraw", 20, UI_Y+80, 180, 30, "Draw Line [D]", clrPurple, clrWhite);
-   CreateButton("BtnScanSD", 270, UI_Y+80, 180, 30, "Scan S&D [A]", clrDarkGreen, clrWhite);
+   CreateButton("BtnDraw", 20, UI_Y+80, 230, 32, "Draw Line [D]", clrPurple, clrWhite);
+   CreateButton("BtnScanSD", 270, UI_Y+80, 230, 32, "Scan S&D [A]", clrDarkGreen, clrWhite);
    
    string bL[]={"Floor","Entry","Stoploss","TP1","TP2","TP3","Area","Risk"}; 
    string sL[]={"Ceiling","Entry","Stoploss","TP1","TP2","TP3","Area","Risk"};
@@ -1770,14 +1770,14 @@ void CreateDashboard() {
       CreateLabel("LB_"+bL[i], 20, UI_Y+130+(i*30), bL[i], clrOrange); CreateEdit("Buy_"+bL[i], 130, UI_Y+134+(i*30), 110, 25, "0.00");
       CreateLabel("LS_"+sL[i], 270, UI_Y+130+(i*30), sL[i], clrOrange); CreateEdit("Sell_"+sL[i], 370, UI_Y+134+(i*30), 110, 25, "0.00");
    }
-   CreateButton("BtnBuyL", 20, UI_Y + 400, 200, 30, "Buy Order [B]", clrBlue, clrWhite);
-   CreateButton("BtnSellL", 270, UI_Y + 400, 200, 30, "Sell Order [S]", clrOrange, clrWhite);
-   CreateButton("DelBuy", 20, UI_Y + 440, 200, 30, "Del Buy [Q]", clrBlue, clrWhite);
-   CreateButton("DelSell", 270, UI_Y + 440, 200, 30, "Del Sell [W]", clrBrown, clrWhite);
+   CreateButton("BtnBuyL", 20, UI_Y + 400, 230, 32, "Buy Order [B]", clrBlue, clrWhite);
+   CreateButton("BtnSellL", 270, UI_Y + 400, 230, 32, "Sell Order [S]", clrOrange, clrWhite);
+   CreateButton("DelBuy", 20, UI_Y + 440, 230, 32, "Del Buy [Q]", clrBlue, clrWhite);
+   CreateButton("DelSell", 270, UI_Y + 440, 230, 32, "Del Sell [W]", clrBrown, clrWhite);
    CreateButton("ClosePos", 20, UI_Y + 480, PANEL_W-40, 30, "Close Positions [P]", clrDarkRed, clrWhite);
    CreateButton("CloseOrd", 20, UI_Y + 520, PANEL_W-40, 30, "Close All Orders [O]", clrMaroon, clrWhite);
-   CreateButton("BuyNow", 20, UI_Y + 560, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
-   CreateButton("SellNow", 270, UI_Y + 560, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
+   CreateButton("BuyNow", 20, UI_Y + 560, 230, 32, "Buy Now", clrDodgerBlue, clrWhite);
+   CreateButton("SellNow", 270, UI_Y + 560, 230, 32, "Sell Now", clrOrangeRed, clrWhite);
    CreateButton("BtnAutoRBR", 20, UI_Y + 600, 230, 32, "RBR: OFF [1]", clrGray, clrBlack);
    CreateButton("BtnAutoDBD", 270, UI_Y + 600, 230, 32, "DBD: OFF [2]", clrGray, clrBlack);
    CreateButton("BtnAutoDBR", 20, UI_Y + 640, 230, 32, "DBR: OFF [3]", clrGray, clrBlack);
