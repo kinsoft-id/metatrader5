@@ -44,8 +44,10 @@ string ZONE_PREF;
 bool IsDashboardVisible = true;
 bool IsQuoteVisible = true;
 bool IsSDScanning = false;
-bool IsAutoLimit = false;
-bool IsAutoLimitRev = false;
+bool IsAutoRBR = false;
+bool IsAutoDBD = false;
+bool IsAutoDBR = false;
+bool IsAutoRBD = false;
 datetime g_lastAutoZoneBar = 0;
 datetime g_lastAutoRevBar = 0;
 datetime g_lastTp2HitBuy = 0;
@@ -57,7 +59,7 @@ double g_lastManualLot = 0.01;
 double g_lastRiskPct = 0.12;
 int UI_Y = 100;      
 int HEADER_Y = 50;   
-int PANEL_W = 500;   
+int PANEL_W = 520;   
 int PANEL_H = 740;   
 int UI_OFFSCREEN = -2000; 
 
@@ -139,11 +141,13 @@ void   ActionDelBuy();
 void   ActionDelSell();
 void   ActionClosePositions();
 void   ActionCloseOrders();
-void   ActionAutoLimit();
-void   ActionAutoLimitRev();
+void   ActionToggleAuto(const int which);
+void   ActionToggleDashboard();
+void   ActionToggleQuote();
 void   ActionReset();
-void   ApplyAutoLimitUI();
-void   ApplyAutoLimitRevUI();
+void   ApplyAutoTypeUI(const string btn, const bool on, const string typeName, const string key);
+void   ApplyAllAutoUI();
+bool   AutoEnabledForType(const string type);
 bool   HotkeyModifiersFree();
 void   HandleHotkey(const long key);
 
@@ -284,49 +288,70 @@ void ActionDelSell()
 }
 void ActionClosePositions() { CloseAllPositions(); }
 void ActionCloseOrders()    { CloseAllOrders(); }
-void ApplyAutoLimitUI()
+bool AutoEnabledForType(const string type)
 {
-   if(ObjectFind(0, PREF+"BtnAutoLmt") < 0) return;
-   if(IsAutoLimit)
-   {
-      ObjectSetString(0, PREF+"BtnAutoLmt", OBJPROP_TEXT, "RBR/DBD: ON [N]");
-      ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_BGCOLOR, clrGreen);
-      ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_COLOR, clrWhite);
-   }
-   else
-   {
-      ObjectSetString(0, PREF+"BtnAutoLmt", OBJPROP_TEXT, "RBR/DBD: OFF [N]");
-      ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_BGCOLOR, clrGray);
-      ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_COLOR, clrBlack);
-   }
+   if(type == "RBR") return IsAutoRBR;
+   if(type == "DBD") return IsAutoDBD;
+   if(type == "DBR") return IsAutoDBR;
+   if(type == "RBD") return IsAutoRBD;
+   return false;
 }
-void ApplyAutoLimitRevUI()
+void ApplyAutoTypeUI(const string btn, const bool on, const string typeName, const string key)
 {
-   if(ObjectFind(0, PREF+"BtnAutoRev") < 0) return;
-   if(IsAutoLimitRev)
-   {
-      ObjectSetString(0, PREF+"BtnAutoRev", OBJPROP_TEXT, "DBR/RBD: ON [M]");
-      ObjectSetInteger(0, PREF+"BtnAutoRev", OBJPROP_BGCOLOR, clrGreen);
-      ObjectSetInteger(0, PREF+"BtnAutoRev", OBJPROP_COLOR, clrWhite);
-   }
-   else
-   {
-      ObjectSetString(0, PREF+"BtnAutoRev", OBJPROP_TEXT, "DBR/RBD: OFF [M]");
-      ObjectSetInteger(0, PREF+"BtnAutoRev", OBJPROP_BGCOLOR, clrGray);
-      ObjectSetInteger(0, PREF+"BtnAutoRev", OBJPROP_COLOR, clrBlack);
-   }
+   if(ObjectFind(0, PREF+btn) < 0) return;
+   ObjectSetString(0, PREF+btn, OBJPROP_TEXT, typeName + (on ? ": ON [" : ": OFF [") + key + "]");
+   ObjectSetInteger(0, PREF+btn, OBJPROP_BGCOLOR, on ? clrGreen : clrGray);
+   ObjectSetInteger(0, PREF+btn, OBJPROP_COLOR, on ? clrWhite : clrBlack);
 }
-void ActionAutoLimit()
+void ApplyAllAutoUI()
 {
-   IsAutoLimit = !IsAutoLimit;
-   ApplyAutoLimitUI();
-   Print("Auto Limit Order RBR/DBD: ", IsAutoLimit ? "ON" : "OFF");
+   ApplyAutoTypeUI("BtnAutoRBR", IsAutoRBR, "RBR", "1");
+   ApplyAutoTypeUI("BtnAutoDBD", IsAutoDBD, "DBD", "2");
+   ApplyAutoTypeUI("BtnAutoDBR", IsAutoDBR, "DBR", "3");
+   ApplyAutoTypeUI("BtnAutoRBD", IsAutoRBD, "RBD", "4");
 }
-void ActionAutoLimitRev()
+void ActionToggleAuto(const int which)
 {
-   IsAutoLimitRev = !IsAutoLimitRev;
-   ApplyAutoLimitRevUI();
-   Print("Auto Limit Order DBR/RBD: ", IsAutoLimitRev ? "ON" : "OFF");
+   string name = "";
+   bool on = false;
+   if(which == 1) { IsAutoRBR = !IsAutoRBR; on = IsAutoRBR; name = "RBR"; }
+   else if(which == 2) { IsAutoDBD = !IsAutoDBD; on = IsAutoDBD; name = "DBD"; }
+   else if(which == 3) { IsAutoDBR = !IsAutoDBR; on = IsAutoDBR; name = "DBR"; }
+   else if(which == 4) { IsAutoRBD = !IsAutoRBD; on = IsAutoRBD; name = "RBD"; }
+   else return;
+   ApplyAllAutoUI();
+   Print("Auto Limit ", name, ": ", on ? "ON" : "OFF");
+}
+void ActionToggleDashboard()
+{
+   IsDashboardVisible = !IsDashboardVisible;
+   ObjectSetString(0, PREF+"Hide", OBJPROP_TEXT, IsDashboardVisible ? "Hide [H]" : "Show [H]");
+   for(int i = 0; i < ObjectsTotal(0); i++)
+   {
+      string name = ObjectName(0, i);
+      if(StringFind(name, PREF) == 0 &&
+         name != PREF+"Hide" &&
+         name != PREF+"HideQuote" &&
+         name != PREF+"Live_Clock" &&
+         name != PREF+"HardStop" &&
+         name != PREF+"Skor1" &&
+         name != PREF+"Skor2" &&
+         name != PREF+"Quote1" &&
+         name != PREF+"Quote2")
+      {
+         ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? GetInitialY(name) : UI_OFFSCREEN);
+      }
+   }
+   ObjectSetInteger(0, PREF+"Hide", OBJPROP_YDISTANCE, HEADER_Y + 7);
+   ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_YDISTANCE, HEADER_Y + 7);
+   ObjectSetInteger(0, PREF+"Hide", OBJPROP_STATE, false);
+}
+void ActionToggleQuote()
+{
+   IsQuoteVisible = !IsQuoteVisible;
+   ObjectSetString(0, PREF+"HideQuote", OBJPROP_TEXT, IsQuoteVisible ? "Hide Q [U]" : "Show Q [U]");
+   ApplyQuoteVisibility();
+   ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_STATE, false);
 }
 void ActionReset()
 {
@@ -367,8 +392,12 @@ void HandleHotkey(const long key)
    else if(key == 87) ActionDelSell();       // W
    else if(key == 80) ActionClosePositions(); // P
    else if(key == 79) ActionCloseOrders();   // O
-   else if(key == 78) ActionAutoLimit();     // N
-   else if(key == 77) ActionAutoLimitRev();  // M
+   else if(key == 49) ActionToggleAuto(1);   // 1 RBR
+   else if(key == 50) ActionToggleAuto(2);   // 2 DBD
+   else if(key == 51) ActionToggleAuto(3);   // 3 DBR
+   else if(key == 52) ActionToggleAuto(4);   // 4 RBD
+   else if(key == 72) ActionToggleDashboard(); // H
+   else if(key == 85) ActionToggleQuote();   // U
    else if(key == 82) ActionReset();         // R
    else return;
 
@@ -394,32 +423,11 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    if(id == CHARTEVENT_OBJECT_CLICK)
    {
       if(sparam == PREF+"Hide") { 
-         IsDashboardVisible = !IsDashboardVisible; 
-         ObjectSetString(0, PREF+"Hide", OBJPROP_TEXT, IsDashboardVisible ? "Hide" : "Show");
-         for(int i=0; i<ObjectsTotal(0); i++) { 
-            string name = ObjectName(0, i); 
-            if(StringFind(name, PREF) == 0 &&
-               name != PREF+"Hide" &&
-               name != PREF+"HideQuote" &&
-               name != PREF+"Live_Clock" &&
-               name != PREF+"HardStop" &&
-               name != PREF+"Skor1" &&
-               name != PREF+"Skor2" &&
-               name != PREF+"Quote1" &&
-               name != PREF+"Quote2") { 
-               ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? GetInitialY(name) : UI_OFFSCREEN); 
-            } 
-         }
-         ObjectSetInteger(0, PREF+"Hide", OBJPROP_YDISTANCE, HEADER_Y + 7); 
-         ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_YDISTANCE, HEADER_Y + 7);
-         ObjectSetInteger(0, PREF+"Hide", OBJPROP_STATE, false);
+         ActionToggleDashboard();
          ChartRedraw();
       }
       else if(sparam == PREF+"HideQuote") {
-         IsQuoteVisible = !IsQuoteVisible;
-         ObjectSetString(0, PREF+"HideQuote", OBJPROP_TEXT, IsQuoteVisible ? "Hide Q" : "Show Q");
-         ApplyQuoteVisibility();
-         ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_STATE, false);
+         ActionToggleQuote();
          ChartRedraw();
       }
       else if(sparam == PREF+"BtnLotMode") {
@@ -451,8 +459,10 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       }
       else if(sparam == PREF+"ClosePos") { ActionClosePositions(); ObjectSetInteger(0, PREF+"ClosePos", OBJPROP_STATE, false); }
       else if(sparam == PREF+"CloseOrd") { ActionCloseOrders(); ObjectSetInteger(0, PREF+"CloseOrd", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"BtnAutoLmt") { ActionAutoLimit(); ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_STATE, false); }
-      else if(sparam == PREF+"BtnAutoRev") { ActionAutoLimitRev(); ObjectSetInteger(0, PREF+"BtnAutoRev", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnAutoRBR") { ActionToggleAuto(1); ObjectSetInteger(0, PREF+"BtnAutoRBR", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnAutoDBD") { ActionToggleAuto(2); ObjectSetInteger(0, PREF+"BtnAutoDBD", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnAutoDBR") { ActionToggleAuto(3); ObjectSetInteger(0, PREF+"BtnAutoDBR", OBJPROP_STATE, false); }
+      else if(sparam == PREF+"BtnAutoRBD") { ActionToggleAuto(4); ObjectSetInteger(0, PREF+"BtnAutoRBD", OBJPROP_STATE, false); }
       else if(sparam == PREF+"Reset") { ActionReset(); ObjectSetInteger(0, PREF+"Reset", OBJPROP_STATE, false); }
       // --- DETEKSI KLIK TOMBOL BULAT S&D ---
       else if(StringFind(sparam, ZONE_PREF + "BTN_") == 0) {
@@ -522,8 +532,7 @@ void TryAutoLimitFromZone(const string type, const double baseLow, const double 
 {
    bool isSnd = (type == "RBR" || type == "DBD");
    bool isRev = (type == "DBR" || type == "RBD");
-   if(isSnd && !IsAutoLimit) return;
-   if(isRev && !IsAutoLimitRev) return;
+   if(!AutoEnabledForType(type)) return;
    if(!isSnd && !isRev) return;
    if(baseLow <= 0.0 || baseHigh <= 0.0 || baseHigh <= baseLow) return;
 
@@ -639,10 +648,7 @@ void ScanSD() {
             if(!legInUp && legOutUp)  { type = "DBR"; shouldDraw = InpShowDBR; }
             if(legInUp && !legOutUp)  { type = "RBD"; shouldDraw = InpShowRBD; }
 
-            bool autoWanted = (i == 1) && (
-               ((type == "RBR" || type == "DBD") && IsAutoLimit) ||
-               ((type == "DBR" || type == "RBD") && IsAutoLimitRev)
-            );
+            bool autoWanted = (i == 1) && AutoEnabledForType(type);
             if(!shouldDraw && !autoWanted) continue;
 
             // RBR/DBR: Close Leg Out di atas base | DBD/RBD: Close Leg Out di bawah base
@@ -1744,8 +1750,8 @@ void CalculateAndDrawAll() {
 void CreateDashboard() {
    CreateObject("HdrPanel", OBJ_RECTANGLE_LABEL, 0, 10, HEADER_Y, PANEL_W, 40, clrBlack);
    ObjectSetInteger(0, PREF+"HdrPanel", OBJPROP_BGCOLOR, clrDarkSlateGray);
-   CreateButton("Hide", 15, HEADER_Y + 7, 65, 25, "Hide", clrGray, clrWhite);
-   CreateButton("HideQuote", 85, HEADER_Y + 7, 90, 25, "Hide Q", clrGray, clrWhite);
+   CreateButton("Hide", 15, HEADER_Y + 7, 90, 25, "Hide [H]", clrGray, clrWhite);
+   CreateButton("HideQuote", 110, HEADER_Y + 7, 115, 25, "Hide Q [U]", clrGray, clrWhite);
    CreateLabel("Title", (PANEL_W / 2) + 20, HEADER_Y + 2, "SND Quick Retest", clrWhite);
    CreateObject("Panel", OBJ_RECTANGLE_LABEL, 0, 10, UI_Y, PANEL_W, PANEL_H, clrDarkSlateGray);
    
@@ -1772,11 +1778,12 @@ void CreateDashboard() {
    CreateButton("CloseOrd", 20, UI_Y + 520, PANEL_W-40, 30, "Close All Orders [O]", clrMaroon, clrWhite);
    CreateButton("BuyNow", 20, UI_Y + 560, 200, 30, "Buy Now", clrDodgerBlue, clrWhite);
    CreateButton("SellNow", 270, UI_Y + 560, 200, 30, "Sell Now", clrOrangeRed, clrWhite);
-   CreateButton("BtnAutoLmt", 20, UI_Y + 600, PANEL_W-40, 30, "RBR/DBD: OFF [N]", clrGray, clrBlack);
-   CreateButton("BtnAutoRev", 20, UI_Y + 640, PANEL_W-40, 30, "DBR/RBD: OFF [M]", clrGray, clrBlack);
-   CreateButton("Reset", 20, UI_Y + 680, PANEL_W-40, 30, "Reset [R]", clrGray, clrBlack);
-   ApplyAutoLimitUI();
-   ApplyAutoLimitRevUI();
+   CreateButton("BtnAutoRBR", 20, UI_Y + 600, 230, 32, "RBR: OFF [1]", clrGray, clrBlack);
+   CreateButton("BtnAutoDBD", 270, UI_Y + 600, 230, 32, "DBD: OFF [2]", clrGray, clrBlack);
+   CreateButton("BtnAutoDBR", 20, UI_Y + 640, 230, 32, "DBR: OFF [3]", clrGray, clrBlack);
+   CreateButton("BtnAutoRBD", 270, UI_Y + 640, 230, 32, "RBD: OFF [4]", clrGray, clrBlack);
+   CreateButton("Reset", 20, UI_Y + 680, PANEL_W-40, 32, "Reset [R]", clrGray, clrBlack);
+   ApplyAllAutoUI();
    ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_ZORDER, 10);
 
    // Tambahkan ini di setiap fungsi pembuatan tombol/label dashboard Anda
@@ -1788,8 +1795,10 @@ void CreateDashboard() {
    ObjectSetInteger(0, "CloseOrd", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
    ObjectSetInteger(0, "BuyNow", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
    ObjectSetInteger(0, "SellNow", OBJPROP_ZORDER, 10); // Angka 10 memastikan dashboard berada di paling depan
-   ObjectSetInteger(0, PREF+"BtnAutoLmt", OBJPROP_ZORDER, 10);
-   ObjectSetInteger(0, PREF+"BtnAutoRev", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, PREF+"BtnAutoRBR", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, PREF+"BtnAutoDBD", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, PREF+"BtnAutoDBR", OBJPROP_ZORDER, 10);
+   ObjectSetInteger(0, PREF+"BtnAutoRBD", OBJPROP_ZORDER, 10);
    ObjectSetInteger(0, PREF+"Reset", OBJPROP_ZORDER, 10);
 
 
@@ -1811,7 +1820,7 @@ void UpdateLine(string name, double price, color clr) { if(ObjectFind(0, name) <
 void UpdateInput(string name, double price) { ObjectSetString(0, PREF+name, OBJPROP_TEXT, DoubleToString(price, _Digits)); }
 void CreateObject(string name, ENUM_OBJECT type, int win, int x, int y, int w, int h, color clr) { ObjectCreate(0, PREF+name, type, win, 0, 0); ObjectSetInteger(0, PREF+name, OBJPROP_XDISTANCE, x); ObjectSetInteger(0, PREF+name, OBJPROP_YDISTANCE, y); ObjectSetInteger(0, PREF+name, OBJPROP_XSIZE, w); ObjectSetInteger(0, PREF+name, OBJPROP_YSIZE, h); }
 void CreateLabel(string name, int x, int y, string text, color clr) { CreateObject(name, OBJ_LABEL, 0, x, y, 0, 0, clr); ObjectSetString(0, PREF+name, OBJPROP_TEXT, text); }
-void CreateButton(string name, int x, int y, int w, int h, string text, color bg, color txtClr) { CreateObject(name, OBJ_BUTTON, 0, x, y, w, h, bg); ObjectSetString(0, PREF+name, OBJPROP_TEXT, text); ObjectSetInteger(0, PREF+name, OBJPROP_BGCOLOR, bg); ObjectSetInteger(0, PREF+name, OBJPROP_COLOR, txtClr); }
+void CreateButton(string name, int x, int y, int w, int h, string text, color bg, color txtClr) { CreateObject(name, OBJ_BUTTON, 0, x, y, w, h, bg); ObjectSetString(0, PREF+name, OBJPROP_TEXT, text); ObjectSetInteger(0, PREF+name, OBJPROP_BGCOLOR, bg); ObjectSetInteger(0, PREF+name, OBJPROP_COLOR, txtClr); ObjectSetInteger(0, PREF+name, OBJPROP_FONTSIZE, 9); ObjectSetString(0, PREF+name, OBJPROP_FONT, "Arial"); }
 void CreateEdit(string name, int x, int y, int w, int h, string val) { CreateObject(name, OBJ_EDIT, 0, x, y, w, h, clrWhite); ObjectSetString(0, PREF+name, OBJPROP_TEXT, val); }
 void DelPO(ENUM_ORDER_TYPE type) { for(int i=OrdersTotal()-1; i>=0; i--) { ulong t=OrderGetTicket(i); if(OrderSelect(t) && OrderGetString(ORDER_SYMBOL)==_Symbol && OrderGetInteger(ORDER_TYPE)==type) trade.OrderDelete(t); } }
 void CloseAllPositions() {
@@ -1861,8 +1870,8 @@ int GetInitialY(string name) {
    if(name == PREF+"ClosePos") return UI_Y + 480;
    if(name == PREF+"CloseOrd") return UI_Y + 520;
    if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 560;
-   if(name == PREF+"BtnAutoLmt") return UI_Y + 600;
-   if(name == PREF+"BtnAutoRev") return UI_Y + 640;
+   if(name == PREF+"BtnAutoRBR" || name == PREF+"BtnAutoDBD") return UI_Y + 600;
+   if(name == PREF+"BtnAutoDBR" || name == PREF+"BtnAutoRBD") return UI_Y + 640;
    if(name == PREF+"Reset") return UI_Y + 680;
    return UI_Y;
 }
