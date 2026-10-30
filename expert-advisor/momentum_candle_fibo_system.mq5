@@ -66,6 +66,10 @@ input int           InpMaxTradesPerDay    = 16;            // Max trades per har
 input int           InpMaxOpenSimultaneous = 6;            // Max posisi/order terbuka bersamaan
 input ulong         InpMagicNumber        = 23018;         // Magic (beda tiap chart)
 input int           InpDeviation          = 20;            // Slippage (points)
+input group "--- TAMPILAN DASHBOARD ---"
+input int InpHeaderY  = 6;   // Posisi header dari atas (kecilkan jika kepotong)
+input int InpFieldGap = 25;  // Jarak baris Layers-Risk
+input int InpBtnH     = 26;  // Tinggi tombol
 
 CTrade   trade;
 string   PREF;
@@ -80,10 +84,26 @@ double   g_lastManualLot = 0.01;
 double   g_lastRiskPct = 0.1;
 
 int      UI_Y = 100;
-int      HEADER_Y = 50;
-int      PANEL_W = 560;
+int      HEADER_Y = 6;
+int      PANEL_W = 520;
 int      PANEL_H = 380;
 int      UI_OFFSCREEN = -2000;
+int      g_hdrH = 32;
+int      g_btnH = 26;
+int      g_fieldGap = 25;
+int      g_editH = 22;
+int      g_col1 = 20;
+int      g_col2 = 270;
+int      g_colW = 230;
+int      g_yLayers = 0;
+int      g_yRisk = 0;
+int      g_yMode = 0;
+int      g_yScan = 0;
+int      g_ySetup = 0;
+int      g_yLim = 0;
+int      g_yDel = 0;
+int      g_yClose = 0;
+int      g_yReset = 0;
 
 int      atrHandle = INVALID_HANDLE;
 string   g_lastReject = "";
@@ -140,6 +160,7 @@ int OnInit()
    trade.SetDeviationInPoints(InpDeviation);
 
    EnsureDayState();
+   InitLayout();
    CreateDashboard();
    ApplyExecModeUI();
    CheckHardDailyStop();
@@ -250,6 +271,8 @@ void HandleHotkey(const long key)
    else if(key == 80) ActionClosePositions();  // P
    else if(key == 79) ActionCloseOrders();     // O
    else if(key == 82) ActionReset();           // R
+   else if(key == 72) ActionTogglePanel();     // H
+   else if(key == 84) ActionToggleQuote();     // T
    else return;
 
    ChartRedraw();
@@ -274,19 +297,13 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    {
       if(sparam == PREF + "Hide")
       {
-         IsDashboardVisible = !IsDashboardVisible;
-         ObjectSetString(0, PREF + "Hide", OBJPROP_TEXT, IsDashboardVisible ? "Hide" : "Show");
-         ApplyDashboardVisibility();
+         ActionTogglePanel();
          ObjectSetInteger(0, PREF + "Hide", OBJPROP_STATE, false);
-         ChartRedraw();
       }
       else if(sparam == PREF + "HideQuote")
       {
-         IsQuoteVisible = !IsQuoteVisible;
-         ObjectSetString(0, PREF + "HideQuote", OBJPROP_TEXT, IsQuoteVisible ? "Hide Q" : "Show Q");
-         ApplyQuoteVisibility();
+         ActionToggleQuote();
          ObjectSetInteger(0, PREF + "HideQuote", OBJPROP_STATE, false);
-         ChartRedraw();
       }
       else if(sparam == PREF + "BtnLotMode")
       {
@@ -388,6 +405,26 @@ void ActionToggleAuto()
             DoubleToString(InpFiboLimit50, 1), " dipasang saat momentum candle berikutnya close.");
    else
       Print("Manual. Scan [F] atau pilih candle [C], lalu Setup [B].");
+   ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+void ActionTogglePanel()
+{
+   IsDashboardVisible = !IsDashboardVisible;
+   if(ObjectFind(0, PREF + "Hide") >= 0)
+      ObjectSetString(0, PREF + "Hide", OBJPROP_TEXT, IsDashboardVisible ? "Hide [H]" : "Show [H]");
+   ApplyDashboardVisibility();
+   ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+void ActionToggleQuote()
+{
+   IsQuoteVisible = !IsQuoteVisible;
+   if(ObjectFind(0, PREF + "HideQuote") >= 0)
+      ObjectSetString(0, PREF + "HideQuote", OBJPROP_TEXT, IsQuoteVisible ? "Hide Q [T]" : "Show Q [T]");
+   ApplyQuoteVisibility();
    ChartRedraw();
 }
 
@@ -921,7 +958,7 @@ bool SendLeg(const string leg, const bool isMarket, const double entry)
    }
 
    int copies = Layers();
-   double lot = LotFor(isBuy, en, sl, true);
+   double lot = LotForSetup(isBuy, true);
    if(lot <= 0.0)
    {
       Print(leg, ": lot 0, batal.");
@@ -1360,32 +1397,19 @@ double RiskPct()
 }
 
 //+------------------------------------------------------------------+
-double CalcLotPerLayer(const ENUM_ORDER_TYPE orderType, const double entry, const double sl,
-                       const int slots, const double riskPct)
+double LossPerLot(const ENUM_ORDER_TYPE orderType, const double entry, const double sl)
 {
-   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   if(slots <= 0 || entry <= 0.0 || sl <= 0.0 || MathAbs(entry - sl) <= 0.0)
+   if(entry <= 0.0 || sl <= 0.0 || MathAbs(entry - sl) <= 0.0)
       return 0.0;
-
-   double base = GetRiskBaseAmount();
-   if(base <= 0.0)
-      return 0.0;
-
-   double riskPerOrder = (base * riskPct / 100.0) / (double)slots;
    double profit = 0.0;
    if(!OrderCalcProfit(orderType, _Symbol, 1.0, entry, sl, profit))
       return 0.0;
-
-   double lossPerLot = MathAbs(profit);
-   if(lossPerLot <= 0.0)
-      return 0.0;
-   return NormalizeLot(riskPerOrder / lossPerLot);
+   return MathAbs(profit);
 }
 
-//+------------------------------------------------------------------+
-double LotFor(const bool isBuy, const double entry, const double sl, const bool verbose)
+// Lot sama untuk 23.6 dan 50. Risk % = total kedua kaki, bukan per kaki.
+double LotForSetup(const bool isBuy, const bool verbose)
 {
-   int slots = 2 * Layers();
    if(!IsAutoLot)
    {
       double lot = GetInputValue("InpLot");
@@ -1404,7 +1428,45 @@ double LotFor(const bool isBuy, const double entry, const double sl, const bool 
    }
 
    ENUM_ORDER_TYPE type = isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-   return CalcLotPerLayer(type, entry, sl, slots, risk);
+   double sl = NormalizeDouble(FiboPrice(InpSlLevel), _Digits);
+   double tp = NormalizeDouble(FiboPrice(InpTpLevel), _Digits);
+   double entries[2];
+   entries[0] = NormalizeDouble(FiboPrice(InpFiboLimit236), _Digits);
+   entries[1] = NormalizeDouble(FiboPrice(InpFiboLimit50), _Digits);
+
+   double sumLoss = 0.0;
+   int n = 0;
+   for(int i = 0; i < 2; i++)
+   {
+      string why = "";
+      if(!GeometryOk(isBuy, entries[i], sl, tp, why))
+         continue;
+      if(!PendingSideOk(isBuy, entries[i], why))
+         continue;
+      double loss = LossPerLot(type, entries[i], sl);
+      if(loss <= 0.0)
+         continue;
+      sumLoss += loss;
+      n++;
+   }
+
+   if(n < 1 || sumLoss <= 0.0)
+      return 0.0;
+
+   double base = GetRiskBaseAmount();
+   if(base <= 0.0)
+      return 0.0;
+
+   double riskMoney = base * risk / 100.0;
+   int copies = Layers();
+   if(copies < 1)
+      copies = 1;
+   double lot = NormalizeLot(riskMoney / (sumLoss * (double)copies));
+   if(verbose)
+      Print("Lot sama kedua limit: ", DoubleToString(lot, 2),
+            " | risk $", DoubleToString(riskMoney, 2),
+            " / ", n, " kaki | saldo ", DoubleToString(base, 2));
+   return lot;
 }
 
 //+------------------------------------------------------------------+
@@ -1442,6 +1504,7 @@ int ValidLegCount(double &riskUSD)
    int copies = Layers();
    int n = 0;
    ENUM_ORDER_TYPE type = isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   double lot = LotForSetup(isBuy, false);
    for(int i = 0; i < 2; i++)
    {
       string why = "";
@@ -1449,7 +1512,6 @@ int ValidLegCount(double &riskUSD)
          continue;
       if(!PendingSideOk(isBuy, entries[i], why))
          continue;
-      double lot = LotFor(isBuy, entries[i], sl, false);
       riskUSD += CalcRiskUSD(type, entries[i], sl, lot, copies);
       n++;
    }
@@ -1865,7 +1927,8 @@ void CreateLabel(const string name, const int x, const int y, const string text,
    CreateObject(name, OBJ_LABEL, x, y, 0, 0);
    ObjectSetString(0, PREF + name, OBJPROP_TEXT, text);
    ObjectSetInteger(0, PREF + name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(0, PREF + name, OBJPROP_FONTSIZE, 10);
+   ObjectSetInteger(0, PREF + name, OBJPROP_FONTSIZE, 9);
+   ObjectSetString(0, PREF + name, OBJPROP_FONT, "Arial");
    ObjectSetInteger(0, PREF + name, OBJPROP_ANCHOR, ANCHOR_LEFT);
    ObjectSetInteger(0, PREF + name, OBJPROP_ZORDER, 15);
 }
@@ -1879,6 +1942,8 @@ void CreateButton(const string name, const int x, const int y, const int w, cons
    ObjectSetInteger(0, PREF + name, OBJPROP_BGCOLOR, bg);
    ObjectSetInteger(0, PREF + name, OBJPROP_COLOR, txtClr);
    ObjectSetInteger(0, PREF + name, OBJPROP_SELECTABLE, true);
+   ObjectSetInteger(0, PREF + name, OBJPROP_FONTSIZE, 9);
+   ObjectSetString(0, PREF + name, OBJPROP_FONT, "Arial");
    ObjectSetInteger(0, PREF + name, OBJPROP_ZORDER, 20);
 }
 
@@ -1983,19 +2048,22 @@ bool IsPanelObject(const string name)
 int GetInitialY(const string name)
 {
    if(name == PREF + "HdrPanel") return HEADER_Y;
-   if(name == PREF + "Title") return HEADER_Y + 12;
+   if(name == PREF + "Hide" || name == PREF + "HideQuote") return HEADER_Y + 4;
+   if(name == PREF + "Title") return HEADER_Y + 2;
    if(name == PREF + "Panel") return UI_Y;
-   if(name == PREF + "LblLayers") return UI_Y + 26;
-   if(name == PREF + "InpLayers" || name == PREF + "BtnLotMode" || name == PREF + "InpLot") return UI_Y + 14;
-   if(name == PREF + "LB_Risk" || name == PREF + "LS_Risk") return UI_Y + 66;
-   if(name == PREF + "Buy_Risk" || name == PREF + "Sell_Risk") return UI_Y + 54;
-   if(name == PREF + "BtnMode") return UI_Y + 94;
-   if(name == PREF + "BtnScanFibo" || name == PREF + "BtnPickCandle") return UI_Y + 134;
-   if(name == PREF + "BtnSetup") return UI_Y + 174;
-   if(name == PREF + "BtnLim236" || name == PREF + "BtnLim50") return UI_Y + 214;
-   if(name == PREF + "DelBuy" || name == PREF + "DelSell") return UI_Y + 254;
-   if(name == PREF + "ClosePos" || name == PREF + "CloseOrd") return UI_Y + 294;
-   if(name == PREF + "Reset") return UI_Y + 334;
+   if(name == PREF + "LblLayers" || name == PREF + "InpLayers" ||
+      name == PREF + "BtnLotMode" || name == PREF + "InpLot")
+      return g_yLayers;
+   if(name == PREF + "LB_Risk" || name == PREF + "LS_Risk" ||
+      name == PREF + "Buy_Risk" || name == PREF + "Sell_Risk")
+      return g_yRisk;
+   if(name == PREF + "BtnMode") return g_yMode;
+   if(name == PREF + "BtnScanFibo" || name == PREF + "BtnPickCandle") return g_yScan;
+   if(name == PREF + "BtnSetup") return g_ySetup;
+   if(name == PREF + "BtnLim236" || name == PREF + "BtnLim50") return g_yLim;
+   if(name == PREF + "DelBuy" || name == PREF + "DelSell") return g_yDel;
+   if(name == PREF + "ClosePos" || name == PREF + "CloseOrd") return g_yClose;
+   if(name == PREF + "Reset") return g_yReset;
    return UI_Y;
 }
 
@@ -2034,23 +2102,52 @@ void CreateQuotes()
    DrawNativeLabel(PREF + "Check1", "1. Close momentum = dua limit: 23.6 dan 50. Tanpa market close.", 20, qy, clrBlack);
    DrawNativeLabel(PREF + "Check2", "2. SL 74.5, TP -27. Limit batal 1 jam, atau saat TP posisi candle itu sendiri kena.", 20, qy + 18, clrBlack);
    DrawNativeLabel(PREF + "Check3", "3. Bullish: 0 di high. Bearish: 0 di low. 74.5 di belakang limit.", 20, qy + 36, clrBlack);
-   DrawNativeLabel(PREF + "Check4", "4. [F] scan  [C] pilih  [M] auto/manual  [B] dua limit", 20, qy + 54, clrBlack);
+   DrawNativeLabel(PREF + "Check4", "4. [F] scan  [C] pilih  [M] auto/manual  [B] dua limit  [H] panel  [T] quote", 20, qy + 54, clrBlack);
    DrawNativeLabel(PREF + "Check5", "5. [2] limit 23.6  [5] limit 50  [Q]/[W] hapus  [P]/[O] close  [R] reset", 20, qy + 72, clrBlack);
+}
+
+//+------------------------------------------------------------------+
+void InitLayout()
+{
+   HEADER_Y = MathMax(0, InpHeaderY);
+   g_hdrH = 32;
+   g_btnH = MathMax(20, InpBtnH);
+   g_fieldGap = MathMax(18, InpFieldGap);
+   g_editH = MathMin(22, g_fieldGap - 2);
+   if(g_editH < 18)
+      g_editH = 18;
+   PANEL_W = 520;
+   g_col1 = 20;
+   g_col2 = 270;
+   g_colW = 230;
+   UI_Y = HEADER_Y + g_hdrH + 2;
+
+   g_yLayers = UI_Y + 6;
+   g_yRisk   = g_yLayers + g_fieldGap;
+   g_yMode   = g_yRisk + g_fieldGap;
+   g_yScan   = g_yMode + g_btnH + 3;
+   g_ySetup  = g_yScan + g_btnH + 3;
+   g_yLim    = g_ySetup + g_btnH + 3;
+   g_yDel    = g_yLim + g_btnH + 3;
+   g_yClose  = g_yDel + g_btnH + 3;
+   g_yReset  = g_yClose + g_btnH + 3;
+   PANEL_H   = (g_yReset - UI_Y) + g_btnH + 8;
 }
 
 //+------------------------------------------------------------------+
 void CreateDashboard()
 {
-   CreateObject("HdrPanel", OBJ_RECTANGLE_LABEL, 10, HEADER_Y, PANEL_W, 40);
+   int fullW = PANEL_W - 40;
+
+   CreateObject("HdrPanel", OBJ_RECTANGLE_LABEL, 10, HEADER_Y, PANEL_W, g_hdrH);
    ObjectSetInteger(0, PREF + "HdrPanel", OBJPROP_BGCOLOR, clrDarkSlateGray);
    ObjectSetInteger(0, PREF + "HdrPanel", OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, PREF + "HdrPanel", OBJPROP_ZORDER, 2);
 
-   CreateButton("Hide", 15, HEADER_Y + 7, 65, 25, "Hide", clrGray, clrWhite);
-   CreateButton("HideQuote", 85, HEADER_Y + 7, 90, 25, "Hide Q", clrGray, clrWhite);
+   CreateButton("Hide", 15, HEADER_Y + 4, 90, 24, "Hide [H]", clrGray, clrWhite);
+   CreateButton("HideQuote", 110, HEADER_Y + 4, 115, 24, "Hide Q [T]", clrGray, clrWhite);
 
-   CreateLabel("Title", 10 + PANEL_W / 2, HEADER_Y + 12, "Momentum Candle", clrWhite);
-   ObjectSetInteger(0, PREF + "Title", OBJPROP_ANCHOR, ANCHOR_CENTER);
+   CreateLabel("Title", (PANEL_W / 2) + 20, HEADER_Y + 2, "Momentum Candle", clrWhite);
    ObjectSetInteger(0, PREF + "Title", OBJPROP_ZORDER, 16);
 
    CreateObject("Panel", OBJ_RECTANGLE_LABEL, 10, UI_Y, PANEL_W, PANEL_H);
@@ -2058,28 +2155,28 @@ void CreateDashboard()
    ObjectSetInteger(0, PREF + "Panel", OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, PREF + "Panel", OBJPROP_ZORDER, 1);
 
-   CreateLabel("LblLayers", 20, UI_Y + 26, "Layers", clrOrange);
-   CreateEdit("InpLayers", 130, UI_Y + 14, 110, 25, "1", false);
-   CreateButton("BtnLotMode", 300, UI_Y + 14, 90, 25, "Risk %", clrDarkGreen, clrWhite);
-   CreateEdit("InpLot", 410, UI_Y + 14, 110, 25, DoubleToString(g_lastRiskPct, 2), false);
+   CreateLabel("LblLayers", g_col1, g_yLayers, "Layers", clrOrange);
+   CreateEdit("InpLayers", 130, g_yLayers + 2, 100, g_editH, "1", false);
+   CreateButton("BtnLotMode", 260, g_yLayers, 100, g_editH + 2, "Risk %", clrDarkGreen, clrWhite);
+   CreateEdit("InpLot", 370, g_yLayers + 2, 100, g_editH, DoubleToString(g_lastRiskPct, 2), false);
    ApplyLotModeUI();
 
-   CreateLabel("LB_Risk", 20, UI_Y + 66, "Risk $", clrOrange);
-   CreateEdit("Buy_Risk", 130, UI_Y + 54, 110, 25, "0.00", true);
-   CreateLabel("LS_Risk", 300, UI_Y + 66, "Risk $", clrOrange);
-   CreateEdit("Sell_Risk", 410, UI_Y + 54, 110, 25, "0.00", true);
+   CreateLabel("LB_Risk", g_col1, g_yRisk, "Risk $", clrOrange);
+   CreateEdit("Buy_Risk", 130, g_yRisk + 2, 110, g_editH, "0.00", true);
+   CreateLabel("LS_Risk", g_col2, g_yRisk, "Risk $", clrOrange);
+   CreateEdit("Sell_Risk", 370, g_yRisk + 2, 110, g_editH, "0.00", true);
 
-   CreateButton("BtnMode", 20, UI_Y + 94, 520, 30, "Manual  [M]", clrDimGray, clrWhite);
-   CreateButton("BtnScanFibo", 20, UI_Y + 134, 250, 30, "Scan Fibo Candle [F]", clrTeal, clrWhite);
-   CreateButton("BtnPickCandle", 290, UI_Y + 134, 250, 30, "Pilih Candle [C]", clrDarkOrange, clrWhite);
-   CreateButton("BtnSetup", 20, UI_Y + 174, 520, 30, "Setup Limit 23.6 + 50 [B]", clrDodgerBlue, clrWhite);
-   CreateButton("BtnLim236", 20, UI_Y + 214, 250, 30, "Limit " + DoubleToString(InpFiboLimit236, 1) + " [2]", clrDodgerBlue, clrWhite);
-   CreateButton("BtnLim50", 290, UI_Y + 214, 250, 30, "Limit " + DoubleToString(InpFiboLimit50, 1) + " [5]", clrOrangeRed, clrWhite);
-   CreateButton("DelBuy", 20, UI_Y + 254, 250, 30, "Del Buy [Q]", clrBlue, clrWhite);
-   CreateButton("DelSell", 290, UI_Y + 254, 250, 30, "Del Sell [W]", clrBrown, clrWhite);
-   CreateButton("ClosePos", 20, UI_Y + 294, 250, 30, "Close Positions [P]", clrDarkRed, clrWhite);
-   CreateButton("CloseOrd", 290, UI_Y + 294, 250, 30, "Close Orders [O]", clrMaroon, clrWhite);
-   CreateButton("Reset", 20, UI_Y + 334, 520, 30, "Reset [R]", clrGray, clrBlack);
+   CreateButton("BtnMode", g_col1, g_yMode, fullW, g_btnH, "Manual  [M]", clrDimGray, clrWhite);
+   CreateButton("BtnScanFibo", g_col1, g_yScan, g_colW, g_btnH, "Scan Fibo Candle [F]", clrTeal, clrWhite);
+   CreateButton("BtnPickCandle", g_col2, g_yScan, g_colW, g_btnH, "Pilih Candle [C]", clrDarkOrange, clrWhite);
+   CreateButton("BtnSetup", g_col1, g_ySetup, fullW, g_btnH, "Setup Limit 23.6 + 50 [B]", clrDodgerBlue, clrWhite);
+   CreateButton("BtnLim236", g_col1, g_yLim, g_colW, g_btnH, "Limit " + DoubleToString(InpFiboLimit236, 1) + " [2]", clrDodgerBlue, clrWhite);
+   CreateButton("BtnLim50", g_col2, g_yLim, g_colW, g_btnH, "Limit " + DoubleToString(InpFiboLimit50, 1) + " [5]", clrOrangeRed, clrWhite);
+   CreateButton("DelBuy", g_col1, g_yDel, g_colW, g_btnH, "Del Buy [Q]", clrBlue, clrWhite);
+   CreateButton("DelSell", g_col2, g_yDel, g_colW, g_btnH, "Del Sell [W]", clrBrown, clrWhite);
+   CreateButton("ClosePos", g_col1, g_yClose, g_colW, g_btnH, "Close Positions [P]", clrDarkRed, clrWhite);
+   CreateButton("CloseOrd", g_col2, g_yClose, g_colW, g_btnH, "Close Orders [O]", clrMaroon, clrWhite);
+   CreateButton("Reset", g_col1, g_yReset, fullW, g_btnH, "Reset [R]", clrGray, clrBlack);
 
    CreateQuotes();
    ApplyExecModeUI();
