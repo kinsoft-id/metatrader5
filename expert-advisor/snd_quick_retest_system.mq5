@@ -37,6 +37,10 @@ input double        InpMaxDailyLossPercent = 2.0; // Hard stop jika Daily PnL+fl
 input int           InpPendingExpireMinutes = 60; // Cancel pending jika tidak kejemput (menit)
 input int           InpTp2CooldownMinutes = 5;   // Jeda setelah kena TP2 sebelum limit baru
 input ulong InpMagicNumber = 1111; // Magic Number (Harus beda tiap chart)
+input group "--- TAMPILAN DASHBOARD ---"
+input int InpHeaderY  = 6;   // Posisi header dari atas (kecilkan jika kepotong)
+input int InpFieldGap = 25;  // Jarak baris Floor-Risk
+input int InpBtnH     = 26;  // Tinggi tombol
 
 
 CTrade trade;
@@ -62,13 +66,30 @@ ulong    g_notedL2PosSell = 0;
 bool IsAutoLot = true;
 double g_lastManualLot = 0.01;
 double g_lastRiskPct = 0.12;
-int UI_Y = 100;      
-int HEADER_Y = 50;   
-int PANEL_W = 520;   
-int PANEL_H = 740;   
-int UI_OFFSCREEN = -2000; 
+int UI_Y = 100;
+int HEADER_Y = 50;
+int PANEL_W = 520;
+int PANEL_H = 740;
+int UI_OFFSCREEN = -2000;
+int g_hdrH = 32;
+int g_btnH = 26;
+int g_fieldGap = 25;
+int g_editH = 22;
+int g_yLayers = 0;
+int g_yLot = 0;
+int g_yDraw = 0;
+int g_yFields = 0;
+int g_yBuy = 0;
+int g_yDel = 0;
+int g_yCloseP = 0;
+int g_yCloseO = 0;
+int g_yNow = 0;
+int g_yAuto1 = 0;
+int g_yAuto2 = 0;
+int g_yReset = 0; 
 
 // --- Function Declarations ---
+void InitLayout();
 void CreateDashboard();
 void CreateDrawingLines();
 void CalculateAndDrawAll();
@@ -165,6 +186,7 @@ int OnInit()
    // Membuat nama objek unik, contoh hasil: "SND_55555_"
    PREF = "SNDQR_" + IntegerToString(InpMagicNumber) + "_";
    ZONE_PREF = "SNDQR_Z_" + IntegerToString(InpMagicNumber) + "_";
+   InitLayout();
 
    IsAutoLot = (InpLotMode == LOT_AUTO_RISK);
    g_lastRiskPct = (InpRiskPerSetup > 0.0) ? InpRiskPerSetup : 0.12;
@@ -393,8 +415,8 @@ void ActionToggleDashboard()
          ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? GetInitialY(name) : UI_OFFSCREEN);
       }
    }
-   ObjectSetInteger(0, PREF+"Hide", OBJPROP_YDISTANCE, HEADER_Y + 7);
-   ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_YDISTANCE, HEADER_Y + 7);
+   ObjectSetInteger(0, PREF+"Hide", OBJPROP_YDISTANCE, HEADER_Y + 4);
+   ObjectSetInteger(0, PREF+"HideQuote", OBJPROP_YDISTANCE, HEADER_Y + 4);
    ObjectSetInteger(0, PREF+"Hide", OBJPROP_STATE, false);
 }
 void ActionToggleQuote()
@@ -1456,7 +1478,7 @@ void CreateCalcLotLabel()
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_UPPER);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 10 + PANEL_W / 2);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, UI_Y + 45);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, g_yLot);
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 9);
    ObjectSetString(0, name, OBJPROP_FONT, "Arial");
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrOrange);
@@ -1501,7 +1523,7 @@ void UpdateLotRiskDisplay(double bEntry, double bSL, double sEntry, double sSL)
 
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_UPPER);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 10 + PANEL_W / 2);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? UI_Y + 45 : UI_OFFSCREEN);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, IsDashboardVisible ? g_yLot : UI_OFFSCREEN);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrOrange);
    ObjectSetInteger(0, name, OBJPROP_ZORDER, 11);
    ObjectSetString(0, name, OBJPROP_TEXT, calcText);
@@ -1806,42 +1828,71 @@ void CalculateAndDrawAll() {
    UpdateLotRiskDisplay(bEntry1, bSL, sEntry1, sSL);
 }
 
+void InitLayout()
+{
+   HEADER_Y = MathMax(0, InpHeaderY);
+   g_hdrH = 32;
+   g_btnH = MathMax(20, InpBtnH);
+   g_fieldGap = MathMax(18, InpFieldGap);
+   g_editH = MathMin(22, g_fieldGap - 2);
+   if(g_editH < 18) g_editH = 18;
+   UI_Y = HEADER_Y + g_hdrH + 2;
+
+   g_yLayers = UI_Y + 6;
+   g_yLot    = g_yLayers + 24;
+   g_yDraw   = g_yLot + 16;
+   g_yFields = g_yDraw + g_btnH + 6;
+   g_yBuy    = g_yFields + 8 * g_fieldGap + 4;
+   g_yDel    = g_yBuy + g_btnH + 3;
+   g_yCloseP = g_yDel + g_btnH + 3;
+   g_yCloseO = g_yCloseP + g_btnH + 3;
+   g_yNow    = g_yCloseO + g_btnH + 3;
+   g_yAuto1  = g_yNow + g_btnH + 3;
+   g_yAuto2  = g_yAuto1 + g_btnH + 3;
+   g_yReset  = g_yAuto2 + g_btnH + 3;
+   PANEL_H   = (g_yReset - UI_Y) + g_btnH + 8;
+}
+
 void CreateDashboard() {
-   CreateObject("HdrPanel", OBJ_RECTANGLE_LABEL, 0, 10, HEADER_Y, PANEL_W, 40, clrBlack);
+   CreateObject("HdrPanel", OBJ_RECTANGLE_LABEL, 0, 10, HEADER_Y, PANEL_W, g_hdrH, clrBlack);
    ObjectSetInteger(0, PREF+"HdrPanel", OBJPROP_BGCOLOR, clrDarkSlateGray);
-   CreateButton("Hide", 15, HEADER_Y + 7, 90, 25, "Hide [H]", clrGray, clrWhite);
-   CreateButton("HideQuote", 110, HEADER_Y + 7, 115, 25, "Hide Q [U]", clrGray, clrWhite);
+   CreateButton("Hide", 15, HEADER_Y + 4, 90, 24, "Hide [H]", clrGray, clrWhite);
+   CreateButton("HideQuote", 110, HEADER_Y + 4, 115, 24, "Hide Q [U]", clrGray, clrWhite);
    CreateLabel("Title", (PANEL_W / 2) + 20, HEADER_Y + 2, "SND Quick Retest", clrWhite);
    CreateObject("Panel", OBJ_RECTANGLE_LABEL, 0, 10, UI_Y, PANEL_W, PANEL_H, clrDarkSlateGray);
    
-   CreateLabel("LblLayers", 20, UI_Y+12, "Layers", clrOrange); CreateEdit("InpLayers", 130, UI_Y+18, 100, 25, "2");
-   CreateButton("BtnLotMode", 260, UI_Y+12, 100, 25, "Lot", clrDarkSlateGray, clrOrange);
-   CreateEdit("InpLot", 370, UI_Y+18, 100, 25, "0.12");
+   CreateLabel("LblLayers", 20, g_yLayers, "Layers", clrOrange);
+   CreateEdit("InpLayers", 130, g_yLayers + 2, 100, g_editH, "2");
+   CreateButton("BtnLotMode", 260, g_yLayers, 100, g_editH + 2, "Lot", clrDarkSlateGray, clrOrange);
+   CreateEdit("InpLot", 370, g_yLayers + 2, 100, g_editH, "0.12");
    CreateCalcLotLabel();
    ApplyLotModeUI();
    
-   CreateButton("BtnDraw", 20, UI_Y+80, 230, 32, "Draw Line [D]", clrPurple, clrWhite);
-   CreateButton("BtnScanSD", 270, UI_Y+80, 230, 32, "Scan S&D [A]", clrDarkGreen, clrWhite);
+   CreateButton("BtnDraw", 20, g_yDraw, 230, g_btnH, "Draw Line [D]", clrPurple, clrWhite);
+   CreateButton("BtnScanSD", 270, g_yDraw, 230, g_btnH, "Scan S&D [A]", clrDarkGreen, clrWhite);
    
    string bL[]={"Floor","Entry","Stoploss","TP1","TP2","TP3","Area","Risk"}; 
    string sL[]={"Ceiling","Entry","Stoploss","TP1","TP2","TP3","Area","Risk"};
    for(int i=0; i<8; i++) {
-      CreateLabel("LB_"+bL[i], 20, UI_Y+130+(i*30), bL[i], clrOrange); CreateEdit("Buy_"+bL[i], 130, UI_Y+134+(i*30), 110, 25, "0.00");
-      CreateLabel("LS_"+sL[i], 270, UI_Y+130+(i*30), sL[i], clrOrange); CreateEdit("Sell_"+sL[i], 370, UI_Y+134+(i*30), 110, 25, "0.00");
+      int fy = g_yFields + (i * g_fieldGap);
+      CreateLabel("LB_"+bL[i], 20, fy, bL[i], clrOrange);
+      CreateEdit("Buy_"+bL[i], 130, fy + 2, 110, g_editH, "0.00");
+      CreateLabel("LS_"+sL[i], 270, fy, sL[i], clrOrange);
+      CreateEdit("Sell_"+sL[i], 370, fy + 2, 110, g_editH, "0.00");
    }
-   CreateButton("BtnBuyL", 20, UI_Y + 400, 230, 32, "Buy Order [B]", clrBlue, clrWhite);
-   CreateButton("BtnSellL", 270, UI_Y + 400, 230, 32, "Sell Order [S]", clrOrange, clrWhite);
-   CreateButton("DelBuy", 20, UI_Y + 440, 230, 32, "Del Buy [Q]", clrBlue, clrWhite);
-   CreateButton("DelSell", 270, UI_Y + 440, 230, 32, "Del Sell [W]", clrBrown, clrWhite);
-   CreateButton("ClosePos", 20, UI_Y + 480, PANEL_W-40, 30, "Close Positions [P]", clrDarkRed, clrWhite);
-   CreateButton("CloseOrd", 20, UI_Y + 520, PANEL_W-40, 30, "Close All Orders [O]", clrMaroon, clrWhite);
-   CreateButton("BuyNow", 20, UI_Y + 560, 230, 32, "Buy Now", clrDodgerBlue, clrWhite);
-   CreateButton("SellNow", 270, UI_Y + 560, 230, 32, "Sell Now", clrOrangeRed, clrWhite);
-   CreateButton("BtnAutoRBR", 20, UI_Y + 600, 230, 32, "RBR: OFF [1]", clrGray, clrBlack);
-   CreateButton("BtnAutoDBD", 270, UI_Y + 600, 230, 32, "DBD: OFF [2]", clrGray, clrBlack);
-   CreateButton("BtnAutoDBR", 20, UI_Y + 640, 230, 32, "DBR: OFF [3]", clrGray, clrBlack);
-   CreateButton("BtnAutoRBD", 270, UI_Y + 640, 230, 32, "RBD: OFF [4]", clrGray, clrBlack);
-   CreateButton("Reset", 20, UI_Y + 680, PANEL_W-40, 32, "Reset [R]", clrGray, clrBlack);
+   CreateButton("BtnBuyL", 20, g_yBuy, 230, g_btnH, "Buy Order [B]", clrBlue, clrWhite);
+   CreateButton("BtnSellL", 270, g_yBuy, 230, g_btnH, "Sell Order [S]", clrOrange, clrWhite);
+   CreateButton("DelBuy", 20, g_yDel, 230, g_btnH, "Del Buy [Q]", clrBlue, clrWhite);
+   CreateButton("DelSell", 270, g_yDel, 230, g_btnH, "Del Sell [W]", clrBrown, clrWhite);
+   CreateButton("ClosePos", 20, g_yCloseP, PANEL_W-40, g_btnH, "Close Positions [P]", clrDarkRed, clrWhite);
+   CreateButton("CloseOrd", 20, g_yCloseO, PANEL_W-40, g_btnH, "Close All Orders [O]", clrMaroon, clrWhite);
+   CreateButton("BuyNow", 20, g_yNow, 230, g_btnH, "Buy Now", clrDodgerBlue, clrWhite);
+   CreateButton("SellNow", 270, g_yNow, 230, g_btnH, "Sell Now", clrOrangeRed, clrWhite);
+   CreateButton("BtnAutoRBR", 20, g_yAuto1, 230, g_btnH, "RBR: OFF [1]", clrGray, clrBlack);
+   CreateButton("BtnAutoDBD", 270, g_yAuto1, 230, g_btnH, "DBD: OFF [2]", clrGray, clrBlack);
+   CreateButton("BtnAutoDBR", 20, g_yAuto2, 230, g_btnH, "DBR: OFF [3]", clrGray, clrBlack);
+   CreateButton("BtnAutoRBD", 270, g_yAuto2, 230, g_btnH, "RBD: OFF [4]", clrGray, clrBlack);
+   CreateButton("Reset", 20, g_yReset, PANEL_W-40, g_btnH, "Reset [R]", clrGray, clrBlack);
    ApplyAllAutoUI();
    ObjectSetInteger(0, PREF+"BtnLotMode", OBJPROP_ZORDER, 10);
 
@@ -1903,8 +1954,8 @@ void CloseAllOrders() {
 
 int GetInitialY(string name) {
    if(name == PREF+"HdrPanel") return HEADER_Y;
-   if(name == PREF+"Hide") return HEADER_Y + 7;
-   if(name == PREF+"HideQuote") return HEADER_Y + 7;
+   if(name == PREF+"Hide") return HEADER_Y + 4;
+   if(name == PREF+"HideQuote") return HEADER_Y + 4;
    if(name == PREF+"Title") return HEADER_Y + 2;
    if(name == PREF+"Live_Clock") return 50;
    if(name == PREF+"HardStop") return 25;
@@ -1913,24 +1964,25 @@ int GetInitialY(string name) {
    if(name == PREF+"Quote1") return 125;
    if(name == PREF+"Quote2") return 150;
    if(name == PREF+"Panel") return UI_Y;
-   if(name == PREF+"LblLayers" || name == PREF+"InpLayers" || name == PREF+"BtnLotMode" || name == PREF+"InpLot") return UI_Y + 12;
-   if(name == PREF+"LblCalcLot") return UI_Y + 45;
-   if(name == PREF+"BtnDraw" || name == PREF+"BtnScanSD") return UI_Y + 80;
+   if(name == PREF+"LblLayers" || name == PREF+"InpLayers" || name == PREF+"BtnLotMode" || name == PREF+"InpLot") return g_yLayers;
+   if(name == PREF+"LblCalcLot") return g_yLot;
+   if(name == PREF+"BtnDraw" || name == PREF+"BtnScanSD") return g_yDraw;
    
    string bL[]={"Floor","Entry","Stoploss","TP1","TP2","TP3","Area","Risk"};
    string sL[]={"Ceiling","Entry","Stoploss","TP1","TP2","TP3","Area","Risk"};
    for(int i=0; i<8; i++) {
-      if(name == PREF+"LB_"+bL[i] || name == PREF+"Buy_"+bL[i]) return UI_Y + 130 + (i*30);
-      if(name == PREF+"LS_"+sL[i] || name == PREF+"Sell_"+sL[i]) return UI_Y + 130 + (i*30);
+      int fy = g_yFields + (i * g_fieldGap);
+      if(name == PREF+"LB_"+bL[i] || name == PREF+"Buy_"+bL[i]) return fy;
+      if(name == PREF+"LS_"+sL[i] || name == PREF+"Sell_"+sL[i]) return fy;
    }
    
-   if(name == PREF+"BtnBuyL" || name == PREF+"BtnSellL") return UI_Y + 400;
-   if(name == PREF+"DelBuy" || name == PREF+"DelSell") return UI_Y + 440;
-   if(name == PREF+"ClosePos") return UI_Y + 480;
-   if(name == PREF+"CloseOrd") return UI_Y + 520;
-   if(name == PREF+"BuyNow" || name == PREF+"SellNow") return UI_Y + 560;
-   if(name == PREF+"BtnAutoRBR" || name == PREF+"BtnAutoDBD") return UI_Y + 600;
-   if(name == PREF+"BtnAutoDBR" || name == PREF+"BtnAutoRBD") return UI_Y + 640;
-   if(name == PREF+"Reset") return UI_Y + 680;
+   if(name == PREF+"BtnBuyL" || name == PREF+"BtnSellL") return g_yBuy;
+   if(name == PREF+"DelBuy" || name == PREF+"DelSell") return g_yDel;
+   if(name == PREF+"ClosePos") return g_yCloseP;
+   if(name == PREF+"CloseOrd") return g_yCloseO;
+   if(name == PREF+"BuyNow" || name == PREF+"SellNow") return g_yNow;
+   if(name == PREF+"BtnAutoRBR" || name == PREF+"BtnAutoDBD") return g_yAuto1;
+   if(name == PREF+"BtnAutoDBR" || name == PREF+"BtnAutoRBD") return g_yAuto2;
+   if(name == PREF+"Reset") return g_yReset;
    return UI_Y;
 }
