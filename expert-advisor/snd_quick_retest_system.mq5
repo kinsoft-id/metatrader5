@@ -14,6 +14,9 @@ input bool   InpShowDBD     = true;  // Tampilkan Drop Base Drop
 input bool   InpShowDBR     = true;  // Tampilkan Drop Base Rally
 input bool   InpShowRBD     = true;  // Tampilkan Rally Base Drop
 input int InpMaxZones = 10; // Maksimal zona yang ditampilkan
+input bool InpUseEmaFilter = true; // Filter EMA 50 vs 200 untuk auto limit
+input int  InpEmaFast = 50;        // EMA cepat
+input int  InpEmaSlow = 200;       // EMA lambat
 
 enum ENUM_LOT_MODE
 {
@@ -28,8 +31,8 @@ input double        InpSplitLot1    = 50.0;      // Split S&D order 1 %
 input double        InpSplitLot2    = 30.0;      // Split S&D order 2 %
 input double        InpSplitLot3    = 20.0;      // Split S&D order 3 %
 input int           InpMaxTradesPerDay = 24;     // Max trades per hari (dari history)
-input int           InpMaxOpenSimultaneous = 5;  // Max posisi/order terbuka bersamaan
-input bool          InpHardDailyStop = true;     // Hard Daily Stop (close semua + disable)
+input int           InpMaxOpenSimultaneous = 2;  // Max posisi/order terbuka bersamaan
+input bool          InpHardDailyStop = false;     // Hard Daily Stop (close semua + disable)
 input double        InpMaxDailyLossPercent = 2.0; // Hard stop jika Daily PnL+floating <= -%
 input int           InpPendingExpireMinutes = 60; // Cancel pending jika tidak kejemput (menit)
 input int           InpTp2CooldownMinutes = 5;   // Jeda setelah kena TP2 sebelum limit baru
@@ -37,6 +40,8 @@ input ulong InpMagicNumber = 1111; // Magic Number (Harus beda tiap chart)
 
 
 CTrade trade;
+int g_emaFastHandle = INVALID_HANDLE;
+int g_emaSlowHandle = INVALID_HANDLE;
 // Di bagian atas (ubah variabel global menjadi tanpa nilai instan dahulu)
 string PREF;
 string ZONE_PREF;
@@ -148,6 +153,7 @@ void   ActionReset();
 void   ApplyAutoTypeUI(const string btn, const bool on, const string typeName, const string key);
 void   ApplyAllAutoUI();
 bool   AutoEnabledForType(const string type);
+bool   EmaFilterAllows(const string type, string &reason);
 bool   HotkeyModifiersFree();
 void   HandleHotkey(const long key);
 
@@ -170,6 +176,14 @@ int OnInit()
    ChartSetInteger(0, CHART_COLOR_FOREGROUND, clrBlack);
    ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, clrWhite);
    ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, clrBlack);
+   g_emaFastHandle = iMA(_Symbol, PERIOD_CURRENT, InpEmaFast, 0, MODE_EMA, PRICE_CLOSE);
+   g_emaSlowHandle = iMA(_Symbol, PERIOD_CURRENT, InpEmaSlow, 0, MODE_EMA, PRICE_CLOSE);
+   if(g_emaFastHandle == INVALID_HANDLE || g_emaSlowHandle == INVALID_HANDLE)
+   {
+      Print("Gagal membuat handle EMA ", InpEmaFast, "/", InpEmaSlow);
+      return INIT_FAILED;
+   }
+
    CreateDashboard(); 
    CheckHardDailyStop(); 
 
@@ -187,6 +201,8 @@ int OnInit()
 void OnDeinit(const int reason) 
 { 
    EventKillTimer();
+   if(g_emaFastHandle != INVALID_HANDLE) IndicatorRelease(g_emaFastHandle);
+   if(g_emaSlowHandle != INVALID_HANDLE) IndicatorRelease(g_emaSlowHandle);
    ObjectsDeleteAll(0, PREF); 
    ObjectsDeleteAll(0, ZONE_PREF); 
    ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrWhite);
@@ -294,6 +310,41 @@ bool AutoEnabledForType(const string type)
    if(type == "DBD") return IsAutoDBD;
    if(type == "DBR") return IsAutoDBR;
    if(type == "RBD") return IsAutoRBD;
+   return false;
+}
+
+bool EmaFilterAllows(const string type, string &reason)
+{
+   if(!InpUseEmaFilter) return true;
+   if(g_emaFastHandle == INVALID_HANDLE || g_emaSlowHandle == INVALID_HANDLE)
+   {
+      reason = "handle EMA tidak valid";
+      return false;
+   }
+
+   double fast[1], slow[1];
+   if(CopyBuffer(g_emaFastHandle, 0, 1, 1, fast) < 1 || CopyBuffer(g_emaSlowHandle, 0, 1, 1, slow) < 1)
+   {
+      reason = "data EMA belum siap";
+      return false;
+   }
+   if(fast[0] == 0.0 || slow[0] == 0.0)
+   {
+      reason = "nilai EMA kosong";
+      return false;
+   }
+
+   bool bull = (fast[0] > slow[0]);
+   bool bear = (fast[0] < slow[0]);
+   bool demand = (type == "RBR" || type == "DBR");
+   bool supply = (type == "DBD" || type == "RBD");
+
+   if(demand && bull) return true;
+   if(supply && bear) return true;
+
+   reason = "EMA " + IntegerToString(InpEmaFast) + (bull ? " di atas " : " di bawah ")
+          + IntegerToString(InpEmaSlow) + " (hanya "
+          + (bull ? "RBR/DBR" : "DBD/RBD") + ")";
    return false;
 }
 void ApplyAutoTypeUI(const string btn, const bool on, const string typeName, const string key)
@@ -536,6 +587,13 @@ void TryAutoLimitFromZone(const string type, const double baseLow, const double 
    if(!isSnd && !isRev) return;
    if(baseLow <= 0.0 || baseHigh <= 0.0 || baseHigh <= baseLow) return;
 
+   string emaReason = "";
+   if(!EmaFilterAllows(type, emaReason))
+   {
+      Print("Auto Limit skip ", type, ": ", emaReason);
+      return;
+   }
+
    datetime zoneBar = iTime(_Symbol, _Period, 1);
    if(isSnd)
    {
@@ -648,7 +706,8 @@ void ScanSD() {
             if(!legInUp && legOutUp)  { type = "DBR"; shouldDraw = InpShowDBR; }
             if(legInUp && !legOutUp)  { type = "RBD"; shouldDraw = InpShowRBD; }
 
-            bool autoWanted = (i == 1) && AutoEnabledForType(type);
+            string emaReason = "";
+            bool autoWanted = (i == 1) && AutoEnabledForType(type) && EmaFilterAllows(type, emaReason);
             if(!shouldDraw && !autoWanted) continue;
 
             // RBR/DBR: Close Leg Out di atas base | DBD/RBD: Close Leg Out di bawah base
