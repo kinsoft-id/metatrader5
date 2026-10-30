@@ -42,7 +42,7 @@ input int            InpLimitExpireMinutes = 60; // Umur limit (menit), 0 = tida
 
 input group "--- MOMENTUM CANDLE ---"
 input ENUM_MOM_SHOW InpShowSide    = MOM_SHOW_BOTH; // Tampilkan sisi
-input double        InpBodyPercent = 70.0;          // Minimal body vs range (%)
+input double        InpBodyPercent = 60.0;          // Minimal body vs range (%)
 input int           InpBreakCandles = 2;            // Minimal break candle sebelumnya
 input int           InpAtrPeriod   = 14;            // Period ATR filter ukuran
 input double        InpMinAtrMult  = 0.6;           // Minimal range = ATR x multiplier
@@ -61,7 +61,7 @@ input group "--- RISK ---"
 input ENUM_LOT_MODE InpLotMode            = LOT_AUTO_RISK; // Mode lot
 input double        InpRiskPercent        = 0.1;           // Risk % (max 1%, dibagi 2 kaki)
 input bool          InpHardDailyStop      = true;          // Hard Daily Stop (close semua + disable)
-input double        InpMaxDailyLossPercent = 2.0;          // Hard stop jika Daily PnL+floating <= -%
+input double        InpMaxDailyLossPercent = 1.0;          // Hard stop jika Daily PnL+floating <= -%
 input int           InpMaxTradesPerDay    = 16;            // Max trades per hari (dari history)
 input int           InpMaxOpenSimultaneous = 6;            // Max posisi/order terbuka bersamaan
 input ulong         InpMagicNumber        = 23018;         // Magic (beda tiap chart)
@@ -1929,7 +1929,7 @@ void CreateLabel(const string name, const int x, const int y, const string text,
    ObjectSetInteger(0, PREF + name, OBJPROP_COLOR, clr);
    ObjectSetInteger(0, PREF + name, OBJPROP_FONTSIZE, 9);
    ObjectSetString(0, PREF + name, OBJPROP_FONT, "Arial");
-   ObjectSetInteger(0, PREF + name, OBJPROP_ANCHOR, ANCHOR_LEFT);
+   ObjectSetInteger(0, PREF + name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
    ObjectSetInteger(0, PREF + name, OBJPROP_ZORDER, 15);
 }
 
@@ -2049,14 +2049,13 @@ int GetInitialY(const string name)
 {
    if(name == PREF + "HdrPanel") return HEADER_Y;
    if(name == PREF + "Hide" || name == PREF + "HideQuote") return HEADER_Y + 4;
-   if(name == PREF + "Title") return HEADER_Y + 2;
+   if(name == PREF + "Title") return HEADER_Y + 8;
    if(name == PREF + "Panel") return UI_Y;
-   if(name == PREF + "LblLayers" || name == PREF + "InpLayers" ||
-      name == PREF + "BtnLotMode" || name == PREF + "InpLot")
+   if(name == PREF + "LblLayers") return g_yLayers + 4;
+   if(name == PREF + "InpLayers" || name == PREF + "BtnLotMode" || name == PREF + "InpLot")
       return g_yLayers;
-   if(name == PREF + "LB_Risk" || name == PREF + "LS_Risk" ||
-      name == PREF + "Buy_Risk" || name == PREF + "Sell_Risk")
-      return g_yRisk;
+   if(name == PREF + "LB_Risk" || name == PREF + "LS_Risk") return g_yRisk + 4;
+   if(name == PREF + "Buy_Risk" || name == PREF + "Sell_Risk") return g_yRisk;
    if(name == PREF + "BtnMode") return g_yMode;
    if(name == PREF + "BtnScanFibo" || name == PREF + "BtnPickCandle") return g_yScan;
    if(name == PREF + "BtnSetup") return g_ySetup;
@@ -2123,8 +2122,8 @@ void InitLayout()
    UI_Y = HEADER_Y + g_hdrH + 2;
 
    g_yLayers = UI_Y + 6;
-   g_yRisk   = g_yLayers + g_fieldGap;
-   g_yMode   = g_yRisk + g_fieldGap;
+   g_yRisk   = g_yLayers + g_editH + 8;
+   g_yMode   = g_yRisk + g_editH + 8;
    g_yScan   = g_yMode + g_btnH + 3;
    g_ySetup  = g_yScan + g_btnH + 3;
    g_yLim    = g_ySetup + g_btnH + 3;
@@ -2147,7 +2146,7 @@ void CreateDashboard()
    CreateButton("Hide", 15, HEADER_Y + 4, 90, 24, "Hide [H]", clrGray, clrWhite);
    CreateButton("HideQuote", 110, HEADER_Y + 4, 115, 24, "Hide Q [T]", clrGray, clrWhite);
 
-   CreateLabel("Title", (PANEL_W / 2) + 20, HEADER_Y + 2, "Momentum Candle", clrWhite);
+   CreateLabel("Title", 240, HEADER_Y + 8, "Momentum Candle", clrWhite);
    ObjectSetInteger(0, PREF + "Title", OBJPROP_ZORDER, 16);
 
    CreateObject("Panel", OBJ_RECTANGLE_LABEL, 10, UI_Y, PANEL_W, PANEL_H);
@@ -2155,15 +2154,15 @@ void CreateDashboard()
    ObjectSetInteger(0, PREF + "Panel", OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, PREF + "Panel", OBJPROP_ZORDER, 1);
 
-   CreateLabel("LblLayers", g_col1, g_yLayers, "Layers", clrOrange);
+   CreateLabel("LblLayers", g_col1, g_yLayers + 4, "Layers", clrOrange);
    CreateEdit("InpLayers", 130, g_yLayers + 2, 100, g_editH, "1", false);
    CreateButton("BtnLotMode", 260, g_yLayers, 100, g_editH + 2, "Risk %", clrDarkGreen, clrWhite);
    CreateEdit("InpLot", 370, g_yLayers + 2, 100, g_editH, DoubleToString(g_lastRiskPct, 2), false);
    ApplyLotModeUI();
 
-   CreateLabel("LB_Risk", g_col1, g_yRisk, "Risk $", clrOrange);
+   CreateLabel("LB_Risk", g_col1, g_yRisk + 4, "Risk $", clrOrange);
    CreateEdit("Buy_Risk", 130, g_yRisk + 2, 110, g_editH, "0.00", true);
-   CreateLabel("LS_Risk", g_col2, g_yRisk, "Risk $", clrOrange);
+   CreateLabel("LS_Risk", 260, g_yRisk + 4, "Risk $", clrOrange);
    CreateEdit("Sell_Risk", 370, g_yRisk + 2, 110, g_editH, "0.00", true);
 
    CreateButton("BtnMode", g_col1, g_yMode, fullW, g_btnH, "Manual  [M]", clrDimGray, clrWhite);
